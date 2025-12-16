@@ -1,0 +1,158 @@
+.pill {
+    padding: 2px 5px;
+    border-radius: 5px;
+    background: #aaaaaa;
+    color: black;
+}
+
+.status-queued {
+    background: #89CFF0;
+    color: black
+}
+
+.status-skipped {
+    background: #aaaaaa;
+    color: black;
+}
+
+.status-starting {
+    background: #0096FF;
+    color: black;
+}
+
+.status-started {
+    background: #0047AB;
+    color: white;
+}
+
+.status-timeout {
+    background: #964B00;
+    color: black;
+}
+
+.status-stopping {
+    background: #888888;
+    color: black
+}
+
+.status-done {
+    background: #001f3f;
+    color: white;
+}
+
+.status-broken {
+    background: #801040;
+    color: white;
+}
+
+.status-success {
+    background: #006400;
+    color: white;
+}
+
+.status-failure {
+    background: #ff0000;
+    color: white;
+}
+
+.status-stopped {
+    background: #111111;
+    color: white;
+}
+
+.status-jammed {
+    background: #FF66FF;
+    color: white;
+}
+
+.run-details {
+    font-size: 0.8em;
+}
+
+.run-details td {
+    white-space: nowrap;
+}
+
+.padded-title {
+    padding-left: 5px
+}
+
+pre {
+    font-size: 10px;
+    line-height: 1.2em;
+    overflow-x: scroll;
+}
+
+/*** progress bar from http://codepen.io/holdencreative/details/pvxGxy  ***/
+.progress {
+    position:relative;
+    height:8px;
+    display:block;
+    background-color:#acece6;
+    background-clip:padding-box;
+    overflow:hidden;
+  }
+  .progress .determinate {
+    position:absolute;
+    background-color:inherit;
+    top:0;
+    bottom:0;
+    background-color:#26a69a;
+    transition:width .3s linear;
+  }
+  .progress .indeterminate {
+    background-color:#26a69a;
+  }
+  .progress .indeterminate:before {
+    content:'';
+    position:absolute;
+    background-color:inherit;
+    top:0;
+    left:0;
+    bottom:0;
+    will-change:left, right;
+    animation:indeterminate 2.1s cubic-bezier(0.65, 0.815, 0.735, 0.395) infinite;
+  }
+  .progress .indeterminate:after {
+    content:'';
+    position:absolute;
+    background-color:inherit;
+    top:0;
+    left:0;
+    bottom:0;
+    will-change:left, right;
+    animation:indeterminate-short 2.1s cubic-bezier(0.165, 0.84, 0.44, 1) infinite;
+    animation-delay:1.15s;
+  }
+  @-webkit-keyframes indeterminate {
+    0% {left:-35%; right:100%}
+    60% {left:100%; right:-90%}
+    100% {left:100%; right:-90%}
+  }
+  @-moz-keyframes indeterminate {
+    0% {left:-35%; right:100%}
+    60% {left:100%; right:-90%}
+    100% {left:100%; right:-90%}
+  }
+  @keyframes indeterminate {
+    0% {left:-35%; right:100%}
+    60% {left:100%; right:-90%}
+    100% {left:100%; right:-90%}
+  }
+  @-webkit-keyframes indeterminate-short {
+    0% {left:-200%; right:100%}
+    60% {left:107%; right:-8%}
+    100% {left:107%; right:-8%}
+  }
+  @-moz-keyframes indeterminate-short {
+    0% {left:-200%; right:100%}
+    60% {left:107%; right:-8%}
+    100% {left:107%; right:-8%}
+  }
+  @keyframes indeterminate-short {
+    0% {left:-200%; right:100%}
+    60% {left:107%; right:-8%}
+    100% {left:107%; right:-8%}
+  }
+  
+  #graph { transform:scale(0.8); }

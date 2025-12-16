@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base href="[[=URL('static')]]/">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="shortcut icon" href="data:image/x-icon;base64,AAABAAEAAQEAAAEAIAAwAAAAFgAAACgAAAABAAAAAgAAAAEAIAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAPAAAAAA=="/>
+    <link rel="stylesheet" href="css/no.css">
+    <link rel="stylesheet" href="css/custom.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.14.0/css/all.min.css" integrity="sha512-1PKOgIY59xJ8Co8+NE6FZ+LOAZKjy+KY8iq0G4B3CyeY6wYHN3yt9PW0XpSriVlkMXe40PTKnXrLnZ9+fkDaog==" crossorigin="anonymous" />
+    <style>      
+      .py4web-validation-error{margin-top:-16px; font-size:0.8em;color:red}
+      nav [role=button] { margin-top: 5px; margin-bottom: 5px}
+    </style>
+    [[block page_head]]<!-- individual pages can customize header here -->[[end]]
+  </head>
+  <body>
+    <header>
+      <!-- Navigation bar -->
+      <nav class="black">
+        <!-- Logo -->
+        <a href="[[=URL('index')]]">
+          <b>CI</b>
+        </a>
+        <!-- Do not touch this -->
+        <label for="hamburger">☰</label>
+        <input type="checkbox" id="hamburger">
+        <!-- Left menu ul/li -->
+        [[block page_left_menu]][[end]]
+        <!-- Right menu ul/li -->
+        <ul>
+          [[if globals().get('user'):]]
+          <li>
+            <a>
+              [[=globals().get('user',{}).get('username')]]
+              [[if globals().get('is_admin'):]](admin)[[pass]]
+                </a>
+          </li>
+          <li>
+            <a role="button" href="[[=URL('auth/logout')]]">Logout</a></li>
+          </li>
+          [[else:]]
+          <li>
+            <a role="button" href="[[=URL("main")]]">Sign In</a>
+          </li>	    
+          [[pass]]
+        </ul>
+      </nav>
+    </header>
+    <!-- beginning of HTML inserted by extending template -->
+    <div id="vue">
+      [[block loading]][[end]]
+      <div>
+        <!-- Flash alert messages, first optional one in data-alert -->
+        <flash-alerts class="padded" data-alert="[[=globals().get('flash','')]]"></flash-alerts>
+      </div>
+      <!-- contect injected by extending page -->
+      [[include]]
+    </div>
+    <!-- end of HTML inserted by extending template -->
+    <footer class="black padded">
+    </footer>
+  </body>
+  <!-- You've gotta have utils.js -->
+  <script src="js/utils.js"></script>
+  [[block page_scripts]]<!-- individual pages can add scripts here -->[[end]]
+</html>

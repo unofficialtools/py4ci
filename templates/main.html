@@ -1,0 +1,93 @@
+[[extend 'layout.html']]
+
+[[block loading]]<div v-if="loading" class="progress"><div class="indeterminate"></div></div>[[end]]
+
+<div>
+	<div class="padded">
+		<form v-on:submit.prevent="search">
+			<input v-model="words" placeholder="search">
+		</form>
+		[[if is_admin:]]
+		<a style="float:right" role="button" href="[[=URL('create_run')]]">Create new run</a>
+		<a style="float:right" role="button" v-on:click="reload_config()">Reload Config</a>
+		[[pass]]
+	</div>
+	<div style="display:table;width:100%">
+		<div style="width:30vw;min-width:200px;display:inline-block;vertical-align:top">
+			<div style="max-height:80vh;overflow-y:auto;top:0">
+				<table class="runs">
+					<tbody>
+						<tr v-for="run in runs" v-on:click="select(run)"
+							style="border-bottom:2px solid white;cursor:pointer">
+							<td style="width:5px" v-bind:class="'status-' + run.status"></td>
+							</td>
+							<td style="background-color:#f6f6f6">
+								<div>#{{run.id}}
+									<strong>{{run.name}}</strong>
+								</div>
+								<small style="white-space:nowrap">
+									{{fmtd(run.queued_timestamp)}} ...
+									{{fmtt(run.start_timestamp)}} ...
+									{{fmtt(run.stop_timestamp)}}
+								</small>
+							</td>
+						</tr>
+						<tr v-if="have_more">
+							<td colspan="2">
+								<button v-on:click="search_more">More</button>
+							</td>
+						</tr>
+					</tbody>
+				</table>
+			</div>
+		</div>
+		<div style="width:69vw;min-width:200px;display:inline-block" v-if="selected_run">			
+			<div class="selected_run" v-for="run in [selected_run]">
+				<div v-bind:class="'status-' + run.status" style="padding:2px 5px">{{run.status}}</div>
+				<div style="background-color:#f6f6f6; padding:2px 5px">
+					#{{run.id}} <b>{{run.name}}</b>
+				</div>
+				<div style="padding:5px;border:2px solid #f6f6f6">
+					<p>{{run.description}}</p>
+					<a class="pill" v-bind:href="'../run/run' + run.id + '.trigger_event.json'"
+						target="blank">Trigger Event</a>
+					<a class="pill" v-bind:href="'../run/run' + run.id + '.output_log.txt'"
+						target="blank">Logs</a>
+					<a class="pill" v-bind:href="'../run/run' + run.id + '.output_data.json'"
+						target="blank">Data</a>									
+					[[if is_admin:]]
+					<a class="pill" v-on:click="rerun(run)">Re-run</a>
+					<a class="pill" v-bind:href="'[[=URL("update_run")]]/' + run.id">Update run</a>
+					[[pass]]
+				</div>
+				<div style="width:100%; display: flex; align-items: flex-start; gap: 10px">
+					<div style="width:30%; flex-grow: 1">
+						<h4>Triggered by</h4>
+						<button v-for="r in ancestor_runs">#{{r.id}} {{r.name}}</button>
+					</div>
+					<div style="width:30%; flex-grow: 1">
+						<h4>History</h4>
+						<div>{{fmtd(run.queued_timestamp)}}: queued</div>
+						<div v-if="run.status=='skipped' || run.status=='jammed'">{{fmtd(run.start_timestamp)}}: skipped</div>
+						<div v-else-if="run.start_timestamp">{{fmtd(run.start_timestamp)}}: started</div>
+						<div v-if="run.stop_timestamp">{{fmtd(run.stop_timestamp)}}: {{run.status}}</div>
+					</div>	
+					<div style="width:30%; flex-grow: 1">
+						<h4>Triggered</h4>
+						<button v-for="r in descendant_runs">#{{r.id}} {{r.name}}</button>
+					</div>
+				</div>
+				<div>
+					<h4>Output Log</h4>
+					<pre>{{run.output_log}}</pre>
+				</div>
+			</div>
+		</div>
+	</div>
+</div>
+
+[[block page_scripts]]
+<script src="[[=URL('static/js/axios.min.js')]]"></script>
+<script src="[[=URL('static/js/vue.min.js')]]"></script>
+<script src="[[=URL('static/js/main.js')]]"></script>
+[[end]]

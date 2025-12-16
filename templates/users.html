@@ -1,0 +1,23 @@
+[[extend 'layout.html']]
+
+<div id="vue">
+  <div style="display:table;width:100%">    
+    <div style="margin:10%;">
+      <table class="users">
+	<thead>
+	  <tr>
+	    <th>Id</th><th>Username</th><th>SSO Id</th><th>Email</th>
+	  </tr>
+	</thead>
+	<tbody>
+	  [[for u in users:]]
+	  <tr>
+	    <td>[[=u.id]]</td><td>[[=u.username]]</td><td>[[=u.sso_id]]</td><td>[[if u.email:]]<a href="mailto:[[u.email]]">[[=u.email]]</a>[[pass]]</td>
+	  </tr>
+	  [[pass]]
+	</tbody>
+      </table>
+    </div>
+  </div>
+</div>  
+

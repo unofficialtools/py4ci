@@ -1,0 +1,41 @@
+tasks:
+
+  my-heartbeat:
+    enabled: true
+    description: test task that check the date every 1h
+    queues:
+    - default
+    tags:
+    - heartbeat
+    triggered_by:
+    period: 12h
+    debounce: 1m
+    priority: 0
+    timeout: 180
+    command: |
+      date && echo '{"status": "success"}' > task.output.json
+    authorized_users:
+    - me
+
+  my-repo-change:
+    enabled: true
+    description: trigger a build on commit
+    queues:
+    - default
+    tags:
+    - repo
+    triggered_by:
+    - ssh_url: git@github.com:web2py/py4web.git
+      branches:
+      - master
+    priority: 0
+    timeout: 180
+    command: |
+      echo "DONE!"
+      git clone https://github.com/web2py/py4web.git
+      pushd py4web
+      ls -l
+      popd
+      echo '{"status": "success"}' > task.output.json
+    authorized_users:
+    - me
