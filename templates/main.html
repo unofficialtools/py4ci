@@ -7,9 +7,10 @@
 <div>
 	<div class="padded">
 		[[if is_admin:]]
-		<a style="float:right" role="button" href="[[=URL('create_run')]]">Create new run</a>
+		<a style="float:right" role="button" href="[[=URL('create_run')]]">Create New Run</a>
 		<a style="float:right" role="button" v-on:click="reload_config()">Reload Config</a>
 		[[pass]]
+		<a style="float:right" role="button" v-on:click="window.location.reload()">Refresh Page</a>
 	</div>
 	<div style="display:flex; width: 100%; min-height: 100vh">
 		<div style="flex: 0 0 20%; min-width: 200px">
