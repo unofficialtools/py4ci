@@ -13,7 +13,7 @@ tasks:
     priority: 0
     timeout: 180
     command: |
-      date && echo '{"status": "success"}' > task.output.json
+      date
     authorized_users:
     - me
 
@@ -31,12 +31,11 @@ tasks:
     priority: 0
     timeout: 180
     command: |
-      git clone https://github.com/web2py/py4web.git
-      pushd py4web
-      ls -l
-      popd
+      #git clone https://github.com/web2py/py4web.git
+      #pushd py4web
+      #ls -l
+      #popd
       echo "DONE!"
-      echo '{"status": "success"}' > task.output.json
     authorized_users:
     - me
 
@@ -51,6 +50,5 @@ tasks:
     timeout: 180
     command: |
       echo "DONE!"
-      echo '{"status": "success"}' > task.output.json
     authorized_users:
     - me

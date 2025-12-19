@@ -39,9 +39,9 @@ STATUSES = (
     "stopping",  # used requested it be stopped
     "stopped",  # it was killed because of user request
     "done",  # run reported that it is completed
-    "broken",  # done but missing task.output.json
-    "success",  # found task.output.json
-    "failure",  # possible value set by status in task.outout.json
+    "broken",  # done but missing task.status
+    "success",  # task success
+    "failure",  # task failure
 )
 
 # statuses that keep a worker busy
@@ -104,14 +104,13 @@ class Remote:
             # create a manager script and run it with dtach do does die on disconnect
             with connection.cd(self.folder):
                 connection.run("chmod +x task.sh", hide=True)
-                script = " ; ".join(
-                    [
-                        "(echo $$ > task.pid) || true",
-                        "(exec ./task.sh > task.log) || true",
-                    ]
-                )
+                steps = [
+                    "((echo $$ > task.pid) || true)",
+                    "((exec ./task.sh > task.log) && (echo 'success' > task.status) || (echo 'failure' > task.status))",
+                ]
                 if self.callback:
-                    script += f" ; curl -X POST {self.callback}"
+                    steps.append(f"(curl -X POST --retry 5 {self.callback})")
+                script = "; ".join(steps)
                 connection.run(f"echo '{script}' > task.manager.sh", hide=True)
                 connection.run("chmod +x task.manager.sh", hide=True)
                 connection.run("dtach -n task.socket -E ./task.manager.sh", hide=True)
@@ -139,7 +138,7 @@ class Remote:
                     status = "timeout"
                 connection.run("./task.cleanup.sh", warn=True, hide=True)
                 # retrieve the expected files
-                for filename in ["task.log", "task.output.json"]:
+                for filename in ["task.log", "task.status"]:
                     local = f"/tmp/{self.folder}.{filename}"
                     try:
                         connection.get(f"{self.folder}/{filename}", local)
@@ -153,12 +152,8 @@ class Remote:
             connection.run(f"rm -rf {self.folder}", hide=True)
             print("cleaned")
         results = None
-        if "task.output.json" in files:
-            results = json.loads(files["task.output.json"])
-            files["task.output.json"] = files["task.output.json"]
-            status = "success"
-            if results.get("status") == "failure":  # maybe account for more states
-                status = "failure"
+        if "task.status" in files:
+            status = files["task.status"].strip()
         elif status != "timeout":
             status = "broken"
         log = files.get("task.log", "").replace("\x00", "\\x00")
@@ -322,7 +317,7 @@ class CI:
         """assign the run to the worker (does not check queue match)"""
         if run.status != "queued":
             return
-        run.update_record(status="starting", worker=worker_name, start_timestamp=now())
+        run.update_record(status="starting", worker=worker_name, start_timestamp=now())                
         self.db.commit()
         try:
             # move input tasks
@@ -331,17 +326,17 @@ class CI:
             callback = f"{self.app_base_url}/api/done/{run.id}"
             input_data = self._assemble_input_data(run)
             worker = self.config["workers"][worker_name]
+            run.update_record(status="started", start_timestamp=now(), output_log=None)
+            self.db.commit()
             Remote(worker["host"], f"{RUNS_FOLDER}/run{run.id}", callback).start(code, input_data)
-            status, log = "started", None
         except Exception:
             tb = traceback.format_exc()
             print(tb)
-            status, log = "jammed", tb
-        run.update_record(status=status, start_timestamp=now(), output_log=log)
-        self.db.commit()
+            run.update_record(status="jammed", start_timestamp=now(), output_log=tb)
+            self.db.commit()
 
     def try_finish_run(self, run):
-        if run.status not in ("done", "started", "stopping", "timeout"):
+        if run.status not in ("done", "starting", "started", "stopping", "timeout"):
             return
         try:
             worker = self.config["workers"][run.worker]
@@ -356,7 +351,7 @@ class CI:
         # record the event
         run.update_record(
             status=status, stop_timestamp=now(), output_log=log, output_data=data
-        )
+        )        
 
         # if periodic, schedule next task
         task = self.config["tasks"].get(run.name)
@@ -411,7 +406,7 @@ class CI:
             # update all links
             for ancestor in ancestors:
                 arun = db.task_run(ancestor)
-                arun.update_record(descendants=(arun.descendants or []) + [drun_id])
+                arun.update_record(descendants=(arun.descendants or []) + [drun_id])                
 
     def _assemble_input_data(self, run):
         db = self.db
@@ -473,9 +468,9 @@ class CI:
 
     def post_run_done(self, run_id):
         """called by workers to report a run is completed"""
-        task = self.db.task_run(run_id)
-        if task and task.status in ("starting", "started"):
-            task.update_record(status="done")
+        run = self.db.task_run(run_id)
+        if run:
+            run.update_record(status="done")
 
     def post_git(self, data):
         """connect to github webhook and update record when receive notification"""
@@ -602,7 +597,6 @@ class CI:
 
 def test_remote(host="user@domain"):
     def check(res, status, msg, data):
-        print("checking repose with status", status)
         try:
             assert res[0] == status
             assert msg in res[1]
@@ -617,7 +611,7 @@ def test_remote(host="user@domain"):
             "remote_name": "a/b/c.zip",
         }
     ]
-    Remote(host).start("echo 'test1' && sleep 2 && echo '{}' > task.output.json")
+    Remote(host).start("echo 'test1' && sleep 2 && echo 'success' > task.status")
     assert Remote(host).is_running()
     time.sleep(4)
     check(
@@ -627,7 +621,7 @@ def test_remote(host="user@domain"):
         {},
     )
 
-    Remote(host).start("echo 'test2' && sleep 10 && echo {} > task.output.json")
+    Remote(host).start("echo 'test2' && sleep 10 && echo 'success' > task.status")
     assert Remote(host).is_running()
     time.sleep(2)
     check(
@@ -648,7 +642,7 @@ def test_remote(host="user@domain"):
     )
 
     Remote(host).start(
-        "echo 'test4' && sleep 2 && echo '{\"status\": \"failure\"}' > task.output.json"
+        "echo 'test4' && sleep 2 && echo 'failure' > task.status"
     )
     assert Remote(host).is_running()
     time.sleep(4)
