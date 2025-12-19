@@ -181,7 +181,8 @@ Tasks are configured in a similar way to workers:
 For example here is the definition of a periodic heartbeat task that tells time (date):
 
     # in file py4ci/ci_config/periodic_tasks.yaml
-    my-heartbeat:
+    tasks:
+      my-heartbeat:
         enabled: true
         description: checks the date every 1h
         queues:
