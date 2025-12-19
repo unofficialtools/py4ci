@@ -60,7 +60,7 @@ SMTP_LOGIN = "username:password"
 SMTP_TLS = False
 
 # configure the hostname
-APP_BASE_URL = "http://127.0.0.1:8000/ci"
+APP_BASE_URL = "http://127.0.0.1:8000/py4ci"
 
 # session settings
 SESSION_TYPE = "cookies"

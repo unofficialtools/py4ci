@@ -1,24 +1,10 @@
-starting 63 queued
-starting 63 queued
-starting 63 queued
-starting 63 queued
-starting 63 queued
-starting 63 queued
-starting 63 queued
-starting 63 queued
-starting 63 queued
-starting 63 queued
-finishing 63 done
-cleaned
-starting 66 queued
-finishing 66 done
-cleaned
-starting 67 queued
-finishing 67 done
-cleaned
-starting 68 queued
-finishing 68 done
-cleaned
-starting 69 queued
-finishing 69 done
-cleaned
+starting 72 queued
+Process Process-1:
+Traceback (most recent call last):
+  File "/home/mdipierro/.local/share/uv/python/cpython-3.11.13-linux-x86_64-gnu/lib/python3.11/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/home/mdipierro/.local/share/uv/python/cpython-3.11.13-linux-x86_64-gnu/lib/python3.11/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/mdipierro/Dropbox/ProjectsActive/py4web/apps/py4ci/tasks.py", line 27, in loop
+    time.sleep(5)
+KeyboardInterrupt

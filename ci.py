@@ -25,7 +25,7 @@ from pydal.tools.tags import Tags
 now = datetime.datetime.utcnow
 never = datetime.datetime(2000, 1, 1, 0, 0, 0)
 
-DEFAULT_TIMEOUT = 180
+DEFAULT_TIMEOUT = "180s"
 # this is a relative path on workers where work fill bbe done
 RUNS_FOLDER = "ci_runs"
 
@@ -161,7 +161,7 @@ class Remote:
 
 
 class CI:
-    def __init__(self, db, app_base_url="http://127.0.0.1:8000/ci", config_path=None):
+    def __init__(self, db, app_base_url="http://127.0.0.1:8000/py4ci", config_path=None):
         self.config_path = config_path or os.path.join(
             os.path.dirname(__file__), "ci_config"
         )
@@ -208,7 +208,7 @@ class CI:
             Field("description", "text", writable=True),
             Field("worker", writable=False),
             Field("priority", "integer", default=0),  # higher comes first
-            Field("timeout", "integer", default=DEFAULT_TIMEOUT),
+            Field("timeout", "float", default=delta(DEFAULT_TIMEOUT).total_seconds()),
             Field("trigger_event", "json", requires=IS_JSON()),
             Field("ancestors", "list:integer", writable=False),
             Field("descendants", "list:integer", writable=False),
@@ -293,7 +293,7 @@ class CI:
             scheduled_timestamp=scheduled_timestamp or now_,
             status="queued",
             priority=task.get("priority") or 0,
-            timeout=task.get("timeout") or DEFAULT_TIMEOUT,
+            timeout=delta(task.get("timeout") or DEFAULT_TIMEOUT).total_seconds(),
             ancestors=ancestors,
             group_id=group_id,
         )

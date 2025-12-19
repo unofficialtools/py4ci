@@ -11,7 +11,7 @@ tasks:
     period: 1h
     debounce: 1m
     priority: 0
-    timeout: 180
+    timeout: 180s
     command: |
       date
     authorized_users:
@@ -29,12 +29,12 @@ tasks:
       branches:
       - master
     priority: 0
-    timeout: 180
+    timeout: 180s
     command: |
-      #git clone https://github.com/web2py/py4web.git
-      #pushd py4web
-      #ls -l
-      #popd
+      git clone https://github.com/web2py/py4web.git
+      pushd py4web
+      ls -l
+      popd
       echo "DONE!"
     authorized_users:
     - me
@@ -47,7 +47,7 @@ tasks:
     triggered_by:
     - task: my-repo-change
     priority: 0
-    timeout: 180
+    timeout: 180s
     command: |
       echo "DONE!"
     authorized_users:
