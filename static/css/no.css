@@ -58,7 +58,6 @@ b, label, strong {
 }
 
 ul {
-  list-style-type:none;
   padding-left:20px
 }
 
@@ -121,7 +120,7 @@ code {
   white-space: nowrap;
 }
 
-p,li,button,fieldset,input,select,textarea,blockquote,table {
+p,button,fieldset,input,select,textarea,blockquote,table {
   margin-bottom: 1.0rem;
 }
 

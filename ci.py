@@ -218,7 +218,7 @@ class CI:
             Field("descendants", "list:integer", writable=False),
             Field("queued_timestamp", "datetime", writable=False),
             Field("scheduled_timestamp", "datetime", writable=True),
-            Field("start_timestamp", "datetime", default=now(), writable=False),
+            Field("start_timestamp", "datetime", writable=False),
             Field("stop_timestamp", "datetime", writable=False),
             Field("output_log", "text", writable=False),
             Field("output_data", "json", writable=False),

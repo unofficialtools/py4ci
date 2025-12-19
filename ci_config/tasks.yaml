@@ -19,7 +19,7 @@ tasks:
 
   my-repo-change:
     enabled: true
-    description: trigger a build on commit
+    description: list files when repo changes
     queues:
     - default
     tags:
@@ -36,6 +36,21 @@ tasks:
       pushd py4web
       ls -l
       popd
+      echo '{"status": "success"}' > task.output.json
+    authorized_users:
+    - me
+
+  my-repo-change-followup:
+    enabled: true
+    description: just prints done!
+    queues:
+    - default
+    triggered_by:
+    - task: my-repo-change
+    priority: 0
+    timeout: 180
+    command: |
+      echo "DONE!"
       echo '{"status": "success"}' > task.output.json
     authorized_users:
     - me
