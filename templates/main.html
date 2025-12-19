@@ -30,7 +30,7 @@
 								</div>
 								<small style="white-space:nowrap">
 									<span class="pill">{{fmtd(run.queued_timestamp)}}</span>
-									<span v-if="run.scheduled_time">... <span
+									<span v-if="run.scheduled_timestamp && !run.start_timestamp">... <span
 											class="pill">{{fmtt(run.scheduled_timestamp)}}</span></span>
 									<span v-if="run.start_timestamp">&gt; <span
 											class="pill">{{fmtt(run.start_timestamp)}}</span></span>
@@ -74,8 +74,8 @@
 							<h4>History</h4>
 							<ul>
 								<li>{{fmtd(selected_run.queued_timestamp)}}: queued</li>
-								<li v-if="selected_run.status=='queued' && selected_run.scheduled_time">
-									{{fmtd(selected_run.scheduled_timestamp)}}: scheduled run time</li>
+								<li v-if="selected_run.scheduled_timestamp">
+									{{fmtd(selected_run.scheduled_timestamp)}}: scheduled start time</li>
 								<li v-if="selected_run.status=='skipped' || selected_run.status=='jammed'">
 									{{fmtd(selected_run.start_timestamp)}}: skipped</li>
 								<li v-else-if="selected_run.start_timestamp">{{fmtd(selected_run.start_timestamp)}}:
