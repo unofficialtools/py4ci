@@ -87,11 +87,11 @@
 						</div>
 						<div style="width:30%; flex-grow: 1">
 							<h4>Ancestor Runs</h4>
-							<button v-for="r in ancestor_runs">#{{r.id}} {{r.name}}</button>
+							<a v-for="r in ancestor_runs" v-bind:href="window.location.pathname+'#'+r.id">#{{r.id}} {{r.name}}</a>
 						</div>
 						<div style="width:30%; flex-grow: 1">
 							<h4>Descendent Runs</h4>
-							<button v-for="r in descendant_runs">#{{r.id}} {{r.name}}</button>
+							<a v-for="r in descendant_runs" v-bind:href="window.location.pathname+'#'+r.id">#{{r.id}} {{r.name}}</a>
 						</div>
 					</div>
 				</div>

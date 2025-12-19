@@ -6,7 +6,7 @@ window.init = function() {
     app.methods = {};
 	app.data.loading = false;
     app.data.runs = [];
-    app.data.words = "";
+    app.data.words = decodeURIComponent(window.location.hash.substring(1).split(";")[0]);
 	app.data.graph = "loading...";
     app.data.have_more = false;	
     app.data.selected_run = null;
@@ -14,7 +14,7 @@ window.init = function() {
     app.data.descendant_runs = [];
 
     app.methods.select = function(run) {
-		window.location.hash = app.vue.words+";"+run.id;
+		history.pushState(null, "", window.location.pathname+"#"+app.vue.words+";"+run.id);
 		app.vue.selected_run = run;
 		app.vue.ancestor_runs = [];
 		app.vue.descendant_runs = [];		
@@ -44,7 +44,7 @@ window.init = function() {
 	};
     app.methods.search = function() {		
 		var run_id = window.location.hash.substring(1).split(";")[1];
-		window.location.hash = app.vue.words+";"+run_id;
+		history.pushState(null, "", window.location.pathname+"#"+app.vue.words+";"+run_id);
 		app.methods._search();
     };
     app.methods._search = function() {		
@@ -104,9 +104,9 @@ window.init = function() {
 				});
 			});
 		}
-    };
+    };	
     app.vue = new Vue({el:"#vue", data:app.data, methods:app.methods});
-	app.vue.words = decodeURIComponent(window.location.hash.substring(1).split(";")[0]);
+  	window.addEventListener("hashchange", () => { window.location.reload(); });
     app.vue._search();
     setInterval(app.update, 10000);
     return app;

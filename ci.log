@@ -1,32 +1,5 @@
-starting 42 queued
-starting 43 queued
-starting 43 queued
-starting 43 queued
-starting 43 queued
-starting 43 queued
-starting 43 queued
-starting 43 queued
-starting 43 queued
-starting 43 queued
-starting 43 queued
-starting 43 queued
-starting 43 queued
-starting 43 queued
-starting 43 queued
-starting 43 queued
-starting 43 queued
-starting 43 queued
-starting 43 queued
-starting 43 queued
-starting 43 queued
-starting 43 queued
-starting 43 queued
-finishing 43 done
+finishing 46 started
 cleaned
-starting 45 queued
-finishing 45 done
-cleaned
-starting 46 queued
 Process Process-1:
 Traceback (most recent call last):
   File "/home/mdipierro/.local/share/uv/python/cpython-3.11.13-linux-x86_64-gnu/lib/python3.11/multiprocessing/process.py", line 314, in _bootstrap
