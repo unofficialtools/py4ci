@@ -19,7 +19,7 @@ import yaml
 from fabric import Connection
 from py4web import action, request
 from pydal import DAL, Field
-from pydal.validators import IS_IN_SET
+from pydal.validators import IS_IN_SET, IS_JSON
 from pydal.tools.tags import Tags
 
 now = datetime.datetime.utcnow
@@ -214,7 +214,7 @@ class CI:
             Field("worker", writable=False),
             Field("priority", "integer", default=0),  # higher comes first
             Field("timeout", "integer", default=DEFAULT_TIMEOUT),
-            Field("trigger_event", "json"),
+            Field("trigger_event", "json", requires=IS_JSON()),
             Field("ancestors", "list:integer", writable=False),
             Field("descendants", "list:integer", writable=False),
             Field("queued_timestamp", "datetime", writable=False),

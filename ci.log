@@ -1,6 +1,3 @@
-finishing 50 done
-cstartinstarting 52 queued
-Traceback (most recstarting 52 queued
 Process Process-1:
 Traceback (most recent call last):
   File "/home/mdipierro/.local/share/uv/python/cpython-3.11.13-linux-x86_64-gnu/lib/python3.11/multiprocessing/process.py", line 314, in _bootstrap
@@ -10,15 +7,3 @@ Traceback (most recent call last):
   File "/home/mdipierro/Dropbox/ProjectsActive/py4web/apps/ci/tasks.py", line 27, in loop
     time.sleep(5)
 KeyboardInterrupt
-    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/mdipierro/.cache/uv/archive-v0/Tm_cdB55uBxqusF64U56d/lib/python3.11/site-packages/fabric/transfer.py", line 308, in put
-    self.sftp.put(localpath=local, remotepath=remote)
-  File "/home/mdipierro/.cache/uv/archive-v0/Tm_cdB55uBxqusF64U56d/lib/python3.11/site-packages/paramiko/sftp_client.py", line 759, in put
-    return self.putfo(fl, remotepath, file_size, callback, confirm)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/mdipierro/.cache/uv/archive-v0/Tm_cdB55uBxqusF64U56d/lib/python3.11/site-packages/paramiko/sftp_client.py", line 722, in putfo
-    raise IOError(
-OSError: size mismatch in put!  0 != 81
-
-finishing 52 done
-cleaned
