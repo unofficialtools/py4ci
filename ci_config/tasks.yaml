@@ -2,13 +2,13 @@ tasks:
 
   my-heartbeat:
     enabled: true
-    description: test task that check the date every 1h
+    description: checks the date every 1h
     queues:
     - default
     tags:
     - heartbeat
     triggered_by:
-    period: 12h
+    period: 1h
     debounce: 1m
     priority: 0
     timeout: 180
@@ -31,11 +31,11 @@ tasks:
     priority: 0
     timeout: 180
     command: |
-      echo "DONE!"
       git clone https://github.com/web2py/py4web.git
       pushd py4web
       ls -l
       popd
+      echo "DONE!"
       echo '{"status": "success"}' > task.output.json
     authorized_users:
     - me

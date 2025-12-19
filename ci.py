@@ -19,6 +19,7 @@ import yaml
 from fabric import Connection
 from py4web import action, request
 from pydal import DAL, Field
+from pydal.validators import IS_IN_SET
 from pydal.tools.tags import Tags
 
 now = datetime.datetime.utcnow
@@ -208,7 +209,7 @@ class CI:
         db.define_table(
             "task_run",
             Field("name", writable=False),
-            Field("status", default="queued", options=STATUSES),
+            Field("status", default="queued", options=STATUSES, requires=IS_IN_SET(STATUSES)),
             Field("description", "text", writable=True),
             Field("worker", writable=False),
             Field("priority", "integer", default=0),  # higher comes first
