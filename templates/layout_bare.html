@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <base href="[[=URL('static')]]/">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>py4ci</title>
+    <link rel="stylesheet" href="css/pico.min.css">
+    <link rel="stylesheet" href="css/custom.css">
+    [[block page_head]][[end]]
+  </head>
+  <body class="bare-layout">
+    <main class="container-fluid" style="padding-block: 1rem">
+      <flash-alerts data-alert="[[=globals().get('flash','')]]"></flash-alerts>
+      [[include]]
+    </main>
+    <script src="js/utils.js"></script>
+    [[block page_scripts]][[end]]
+  </body>
+</html>

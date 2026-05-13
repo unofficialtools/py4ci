@@ -10,6 +10,7 @@
 	<span class="title">Runs</span>
 	[[if is_admin:]]
 	<a role="button" class="primary" href="[[=URL('create_run')]]">New run</a>
+	<a role="button" class="secondary outline" href="[[=URL('workers')]]">Workers</a>
 	<button type="button" class="secondary outline" v-on:click="reload_config()">Reload config</button>
 	[[pass]]
 	<button type="button" class="secondary outline" v-on:click="refresh_page()">Refresh</button>
@@ -28,12 +29,16 @@
 					<tr v-for="run in runs"
 					    v-on:click="select(run)"
 					    v-bind:class="{'run-selected': run === selected_run}">
-						<td class="swatch" v-bind:class="'status-' + run.status"></td>
+						<td class="swatch"
+						    v-bind:class="'status-' + run.status"
+						    v-bind:title="run.status"
+						    v-on:click.stop="addFilter('', run.status)"></td>
 						<td>
 							<div>
 								<span class="run-id">#{{ run.id }}</span>
 								<span class="run-name">{{ run.name }}</span>
 							</div>
+							<div v-if="run.description" class="run-description">{{ run.description }}</div>
 							<div class="run-meta">
 								<span class="pill">{{ fmtd(run.queued_timestamp) }}</span>
 								<span v-if="run.scheduled_timestamp && !run.start_timestamp"
@@ -44,7 +49,10 @@
 								      class="pill">■ {{ fmtt(run.stop_timestamp) }}</span>
 							</div>
 							<div class="run-tags" v-if="run.tags && run.tags.length">
-								<span class="pill tag-pill" v-for="t in run.tags" v-bind:key="t">{{ t }}</span>
+								<a class="pill tag-pill"
+								   v-for="t in run.tags"
+								   v-bind:key="t"
+								   v-on:click.stop="addFilter('', t)">{{ t }}</a>
 							</div>
 						</td>
 					</tr>
@@ -181,10 +189,13 @@
 window.PY4CI_URLS = {
 	runs: "[[=URL('api/runs')]]",
 	run_template: "[[=URL('run/run')]]" + "{id}." + "{kind}",
-	rerun_template: "[[=URL('api/rerun')]]" + "/{id}",
+	log_tail_template: "[[=URL('api/runs')]]" + "/{id}/log_tail",
 	update_template: "[[=URL('update_run')]]" + "/{id}",
-	config_reload: "[[=URL('api/config/reload')]]",
 	readme: "[[=URL('readme')]]",
+	[[if is_admin:]]
+	admin_rerun: "[[=URL('api/admin/rerun', signer=admin_url_signer)]]",
+	admin_config_reload: "[[=URL('api/admin/config/reload', signer=admin_url_signer)]]",
+	[[pass]]
 };
 </script>
 <script src="[[=URL('static/js/main.js')]]"></script>

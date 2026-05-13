@@ -1,0 +1,70 @@
+[[extend 'layout.html']]
+
+<article class="card wide">
+  <h2>Workers</h2>
+  <p style="color:var(--pico-muted-color)">
+    Configured in <code>ci_config/*.toml</code>. Edit on disk, then
+    <a href="[[=URL('main')]]">Reload config</a> on the dashboard.
+  </p>
+  <figure>
+    <table role="grid" id="workers-table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Host</th>
+          <th>Queues</th>
+          <th>Currently running</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td colspan="4" style="text-align:center;color:var(--pico-muted-color)">Loading…</td></tr>
+      </tbody>
+    </table>
+  </figure>
+  <p id="workers-errors" style="color:var(--pico-color);"></p>
+</article>
+
+[[block page_scripts]]
+<script src="[[=URL('static/js/axios.min.js')]]"></script>
+<script>
+(function () {
+  function render(rows) {
+    var tbody = document.querySelector("#workers-table tbody");
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--pico-muted-color)">No workers configured.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows.map(function (w) {
+      var running = (w.running || []).map(function (r) {
+        return '<a href="[[=URL('main')]]#;' + r.id + '">#' + r.id + ' ' + r.name + '</a>';
+      }).join(", ") || '<small style="color:var(--pico-muted-color)">idle</small>';
+      var queues = (w.queues || []).map(function (q) {
+        return '<span class="pill">' + q + '</span>';
+      }).join(" ");
+      return "<tr>"
+        + "<td><strong>" + w.name + "</strong></td>"
+        + "<td><code>" + w.host + "</code></td>"
+        + "<td>" + queues + "</td>"
+        + "<td>" + running + "</td>"
+        + "</tr>";
+    }).join("");
+  }
+  function refresh() {
+    axios.get("[[=URL('api/workers')]]").then(function (res) {
+      render(res.data.workers || []);
+      var errs = (res.data.config_errors || []);
+      var el = document.querySelector("#workers-errors");
+      if (errs.length) {
+        el.innerHTML = "<strong>Config errors:</strong><ul>"
+          + errs.map(function (e) { return "<li>" + e + "</li>"; }).join("")
+          + "</ul>";
+      } else {
+        el.textContent = "";
+      }
+    });
+  }
+  refresh();
+  setInterval(refresh, 10000);
+})();
+</script>
+[[end]]

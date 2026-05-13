@@ -136,6 +136,16 @@
 .run-list .run-name {
   font-weight: 600;
 }
+.run-list .run-description {
+  margin-top: 0.1rem;
+  color: var(--pico-muted-color);
+  font-size: 0.78rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.run-list td.swatch { cursor: pointer; }
+.run-list a.tag-pill { cursor: pointer; }
 .run-list .run-meta {
   margin-top: 0.15rem;
   display: flex;

@@ -7,8 +7,8 @@ together into pipelines.
 
 It is designed as a lightweight alternative to systems like Jenkins or Bamboo
 for deployments in the range of one worker on the same machine up to about a
-thousand workers. It is single-binary, single-database, and easy to read end
-to end.
+thousand workers. It is single-process, single-database, and easy to read
+end to end.
 
 py4ci emphasises:
 
@@ -221,7 +221,7 @@ administrators = ["alice", "bob@example.com"]
 
 ```toml
 [variables]
-build_image  = "alpine:3.19"
+build_target = "main"
 some_secret  = "abracadabra"
 ```
 
@@ -229,11 +229,15 @@ some_secret  = "abracadabra"
 - Reference them as `${:name}` in the command. Example:
 
       command = """
-      docker run ${:build_image} sh -c "echo $SOME_SECRET=${:some_secret}"
+      git checkout ${:build_target}
+      echo "$SOME_SECRET=${:some_secret}"
       """
 
 - Substitution happens at config-load time, not per-run, so changing a
   variable requires a config reload.
+- Referencing an undefined variable (e.g. `${:nope}`) is a configuration
+  error: it surfaces in the **Reload config** flash and the task is
+  rejected until the typo is fixed.
 
 ### `workers`
 

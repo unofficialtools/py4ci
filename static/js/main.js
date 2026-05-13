@@ -1,19 +1,21 @@
 "use strict";
 
-// PY4CI_URLS is injected by the template (main.html) so we never hardcode
-// route paths in JS. Expected keys:
-//   runs               -> /api/runs
-//   run_template       -> "/run/run{id}.{kind}"  ({id} and {kind} substituted)
-//   rerun_template     -> "/api/rerun/{id}"
-//   config_reload      -> /api/config/reload
+// PY4CI_URLS is injected by the template. Expected keys:
+//   runs                  -> GET/POST /api/runs
+//   run_template          -> "/run/run{id}.{kind}"
+//   log_tail_template     -> "/api/runs/{id}/log_tail"
+//   update_template       -> "/update_run/{id}"
+//   readme                -> "/readme"
+// Admin-only (only injected when is_admin is true):
+//   admin_rerun           -> signed POST /api/admin/rerun
+//   admin_config_reload   -> signed POST /api/admin/config/reload
 const URLS = window.PY4CI_URLS || {};
 
 function runUrl(id, kind) {
     return URLS.run_template.replace("{id}", id).replace("{kind}", kind);
 }
-
-function rerunUrl(id) {
-    return URLS.rerun_template.replace("{id}", id);
+function logTailUrl(id) {
+    return URLS.log_tail_template.replace("{id}", id);
 }
 
 function parseHash() {
@@ -23,8 +25,6 @@ function parseHash() {
 
 function fmtd(date) {
     if (!date) return "";
-    // The server emits naive UTC; parse as ISO and let toLocaleString format
-    // it in the user's local zone. Avoids the "ZZ" double-suffix trap.
     var d = new Date(date.endsWith("Z") ? date : date + "Z");
     if (isNaN(d.getTime())) return "";
     var pad = function (n) { return n < 10 ? "0" + n : "" + n; };
@@ -32,9 +32,18 @@ function fmtd(date) {
         + " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
 }
 
+// Strip ANSI SGR/CSI/OSC escape codes so colorized CI output (pytest, cargo,
+// npm, etc.) renders as readable plain text instead of escape-soup.
+const ANSI_RE = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]/g;
+function stripAnsi(s) {
+    return (s || "").replace(ANSI_RE, "");
+}
+
+const RUNNING_STATUSES = new Set(["queued", "starting", "started", "stopping", "done"]);
+
 const EMPTY_MODAL = {
     open: false,
-    type: "",       // 'text' | 'json' | 'iframe' | 'confirm'
+    type: "",
     title: "",
     content: "",
     url: "",
@@ -54,6 +63,9 @@ const App = {
             ancestor_runs: [],
             descendant_runs: [],
             modal: Object.assign({}, EMPTY_MODAL),
+            // Active log-tail bookkeeping.
+            log_size: 0,
+            log_polling_for: null,
         };
     },
     methods: {
@@ -78,15 +90,28 @@ const App = {
                     this.descendant_runs = rows;
                 });
             }
-            if (!run.output_log) {
-                axios.get(runUrl(run.id, "output_log.txt")).then((res) => {
-                    run.output_log = res.data;
-                });
-            }
+            run.output_log = "";
+            this.log_size = 0;
+            this._tailLog(run);
         },
 
-        // Use POST for run-id lookups so we don't blow URL-length limits when
-        // the polling list grows. The server endpoint accepts both.
+        _tailLog(run) {
+            // Pull a chunk from the server (file for terminal runs, live tail
+            // from the worker for in-progress runs). The poller (`update`)
+            // keeps calling this so we get tail behavior without SSE.
+            if (!run) return;
+            this.log_polling_for = run.id;
+            var params = { offset: this.log_size };
+            axios.get(logTailUrl(run.id), { params: params }).then((res) => {
+                if (this.selected_run !== run) return;  // user moved on
+                var chunk = (res.data && res.data.chunk) || "";
+                if (chunk) {
+                    run.output_log = (run.output_log || "") + chunk;
+                    this.log_size = res.data.size || (this.log_size + chunk.length);
+                }
+            }).catch(() => { /* network blip; next tick will retry */ });
+        },
+
         _fetchRuns(ids) {
             return axios.post(URLS.runs, { ids: ids.join(",") })
                 .then((res) => res.data.runs);
@@ -118,15 +143,27 @@ const App = {
                 this.loading = false;
                 res.data.runs.forEach((run) => { run.output_log = ""; });
                 this.runs = this.runs.concat(res.data.runs);
-                // server now tells us explicitly whether there are more rows
                 this.have_more = !!res.data.has_more;
                 if (!this.selected_run) {
                     if (this.runs.length > 0) this.selected_run = this.runs[0];
                     var run_id = parseHash().run_id;
                     var selected = this.runs.filter((r) => String(r.id) === String(run_id))[0];
                     if (selected) this.select(selected);
+                    else if (this.selected_run) this._tailLog(this.selected_run);
                 }
             });
+        },
+
+        addFilter(prefix, value) {
+            // Append a chip to the search box. If the same token is already
+            // there, clicking it toggles it off.
+            var token = prefix ? prefix + ":" + value : value;
+            var parts = (this.words || "").split(/\s+/).filter(Boolean);
+            var idx = parts.indexOf(token);
+            if (idx >= 0) parts.splice(idx, 1);
+            else parts.push(token);
+            this.words = parts.join(" ");
+            this.search();
         },
 
         // ---- modal -------------------------------------------------
@@ -140,7 +177,6 @@ const App = {
             this._editFirstLoad = false;
         },
         onDialogBackdropClick(e) {
-            // close when the user clicks the dialog backdrop (outside <article>)
             if (e.target.tagName === "DIALOG") this.closeModal();
         },
 
@@ -157,10 +193,11 @@ const App = {
         viewLogs(run) {
             axios.get(this.outputLogUrl(run.id)).then((res) => {
                 var text = typeof res.data === "string" ? res.data : String(res.data);
+                var clean = stripAnsi(text);
                 this.openModal({
-                    type: this.isHtmlOutput(text) ? "html" : "text",
+                    type: this.isHtmlOutput(clean) ? "html" : "text",
                     title: "Output log — #" + run.id + " " + run.name,
-                    content: text,
+                    content: clean,
                 });
             });
         },
@@ -174,16 +211,17 @@ const App = {
             });
         },
         rerun(run) {
-            if (!run) return;
+            if (!run || !URLS.admin_rerun) return;
             this.openModal({
                 type: "confirm",
                 title: "Re-run #" + run.id,
                 content: 'Re-run "' + run.name + '"? It will be re-queued.',
                 confirmLabel: "Re-run",
                 confirm: () => {
-                    axios.post(rerunUrl(run.id)).then(() => {
+                    axios.post(URLS.admin_rerun, { run_id: run.id }).then(() => {
                         run.status = "queued";
                         run.output_log = "";
+                        this.log_size = 0;
                         this.closeModal();
                     });
                 },
@@ -198,9 +236,6 @@ const App = {
             });
         },
         viewHelp() {
-            // Fetch the bundled README and render it client-side with marked.
-            // If marked isn't loaded yet (older cached main.html), fall back
-            // to plain text inside the modal so help is always reachable.
             axios.get(URLS.readme).then((res) => {
                 var src = typeof res.data === "string" ? res.data : String(res.data);
                 var html = (typeof window.marked !== "undefined")
@@ -217,9 +252,6 @@ const App = {
             });
         },
         onEditFrameLoad() {
-            // The edit form POSTs back to update_run/<id>, then redirects to
-            // /main. The first iframe load is the form itself; any subsequent
-            // load means the form was submitted, so close + refresh.
             if (this._editFirstLoad) {
                 this._editFirstLoad = false;
                 return;
@@ -229,9 +261,27 @@ const App = {
         },
 
         reload_config() {
-            if (confirm("reload?")) {
-                axios.post(URLS.config_reload);
-            }
+            if (!URLS.admin_config_reload) return;
+            this.openModal({
+                type: "confirm",
+                title: "Reload config",
+                content: "Re-read ci_config/*.toml from disk?",
+                confirmLabel: "Reload",
+                confirm: () => {
+                    axios.post(URLS.admin_config_reload).then((res) => {
+                        var errs = (res.data && res.data.errors) || [];
+                        if (errs.length) {
+                            this.openModal({
+                                type: "text",
+                                title: "Config errors",
+                                content: errs.join("\n"),
+                            });
+                        } else {
+                            this.closeModal();
+                        }
+                    });
+                },
+            });
         },
 
         refresh_page() {
@@ -239,17 +289,26 @@ const App = {
         },
 
         update() {
+            // Refresh in-flight rows (status/timestamps may have changed).
             var mapped = {};
             var run_ids = this.runs.filter((run) => {
                 mapped[run.id] = run;
-                return ["queued", "starting", "started", "stopping", "done"].indexOf(run.status) >= 0;
+                return RUNNING_STATUSES.has(run.status);
             }).map((run) => run.id);
-            if (run_ids.length === 0) return;
-            this._fetchRuns(run_ids).then((rows) => {
-                rows.forEach((run) => {
-                    for (var key in run) mapped[run.id][key] = run[key];
+            if (run_ids.length > 0) {
+                this._fetchRuns(run_ids).then((rows) => {
+                    rows.forEach((run) => {
+                        for (var key in run) {
+                            if (key === "output_log") continue;
+                            mapped[run.id][key] = run[key];
+                        }
+                    });
                 });
-            });
+            }
+            // Live-tail the currently selected run if it's still active.
+            if (this.selected_run && RUNNING_STATUSES.has(this.selected_run.status)) {
+                this._tailLog(this.selected_run);
+            }
         },
 
         triggerEventUrl(id) { return runUrl(id, "trigger_event.json"); },
@@ -257,19 +316,15 @@ const App = {
         outputDataUrl(id) { return runUrl(id, "output_data.json"); },
         hashFor(id) { return window.location.pathname + "#" + this.words + ";" + id; },
 
-        // Treat output as HTML if it starts (after whitespace) with a
-        // recognizable HTML opener — covers DOCTYPE, <html>, <body>, etc.
         isHtmlOutput(log) {
             if (!log) return false;
             return /^\s*(<!doctype html|<html\b|<body\b|<head\b)/i.test(log);
         },
 
-        // Plain-text output: HTML-escape, then turn http(s) URLs into
-        // clickable anchors. Returned HTML is safe to v-html because the
-        // user content was escaped before we injected the anchor markup.
         linkifyLog(log) {
-            if (!log) return "";
-            var escaped = log
+            var clean = stripAnsi(log);
+            if (!clean) return "";
+            var escaped = clean
                 .replace(/&/g, "&amp;")
                 .replace(/</g, "&lt;")
                 .replace(/>/g, "&gt;")
@@ -295,8 +350,6 @@ const App = {
 
 window.init = function () {
     var app = Vue.createApp(App);
-    // <flash-alerts> is a web component from utils.js; don't try to resolve
-    // it as a Vue component.
     app.config.compilerOptions.isCustomElement = function (tag) {
         return tag.indexOf("-") !== -1;
     };

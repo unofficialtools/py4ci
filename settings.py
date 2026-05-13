@@ -140,6 +140,9 @@ RUN_CI_LOOP_INPROCESS = MODE == "development"
 # empty, signature verification is disabled (only safe for local development).
 GITHUB_WEBHOOK_SECRET = os.environ.get("PY4CI_GITHUB_WEBHOOK_SECRET", "")
 
+# Run retention is configured per-task in tasks.toml as `retention = "30d"`.
+# Tasks without an explicit retention keep their runs forever.
+
 # Override allow-list for the PY4WEB_TESTING bypass. The bypass is only honored
 # when MODE == "development" AND this secret matches PY4WEB_TESTING_SECRET in
 # the environment.
