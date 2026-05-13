@@ -1,5 +1,0 @@
-workers:
-  worker01:
-     host: mdipierro@127.0.0.1
-     queues:
-     - default

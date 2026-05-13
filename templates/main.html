@@ -1,112 +1,191 @@
 [[extend 'layout.html']]
 
-[[block loading]]<div v-if="loading" class="progress">
+[[block loading]]
+<div v-if="loading" class="progress">
 	<div class="indeterminate"></div>
-</div>[[end]]
-
-<div>
-	<div class="padded">
-		[[if is_admin:]]
-		<a style="float:right" role="button" href="[[=URL('create_run')]]">Create New Run</a>
-		<a style="float:right" role="button" v-on:click="reload_config()">Reload Config</a>
-		[[pass]]
-		<a style="float:right" role="button" v-on:click="window.location.reload()">Refresh Page</a>
-	</div>
-	<div style="display:flex; width: 100%; min-height: 100vh">
-		<div style="flex: 0 0 20%; min-width: 200px">
-			<div style="margin:2px 5px">
-				<form v-on:submit.prevent="search">
-					<input v-model="words" placeholder="search by name or tag">
-				</form>
-			</div>
-			<div style="max-height:80vh;overflow-y:auto;top:0">
-				<table class="runs">
-					<tbody>
-						<tr v-for="run in runs" v-on:click="select(run)"
-							v-bind:class="{'run-selected': run==selected_run}">
-							<td style="width:5px" v-bind:class="'status-' + run.status"></td>
-							<td>
-								<div>#{{run.id}}
-									<strong>{{run.name}}</strong>
-								</div>
-								<small style="white-space:nowrap">
-									<span class="pill">{{fmtd(run.queued_timestamp)}}</span>
-									<span v-if="run.scheduled_timestamp && !run.start_timestamp">... <span
-											class="pill">{{fmtt(run.scheduled_timestamp)}}</span></span>
-									<span v-if="run.start_timestamp">&gt; <span
-											class="pill">{{fmtt(run.start_timestamp)}}</span></span>
-									<span v-if="run.stop_timestamp">&gt; <span
-											class="pill">{{fmtt(run.stop_timestamp)}}</span></span>
-								</small>
-							</td>
-						</tr>
-						<tr v-if="have_more">
-							<td colspan="2">
-								<button v-on:click="search_more">More</button>
-							</td>
-						</tr>
-					</tbody>
-				</table>
-			</div>
-		</div>
-		<div style="flex: 1" v-if="selected_run">
-			<div class="selected_run">
-				<div v-bind:class="'status-' + selected_run.status" style="padding:2px 5px">{{selected_run.status}}
-				</div>
-				<div style="background-color:#f6f6f6; padding:2px 5px">
-					Selected run: #{{selected_run.id}} <b>{{selected_run.name}}</b>
-				</div>
-				<div style="padding:10px 20px;border:2px solid #f6f6f6">
-					<p>{{selected_run.description}}</p>
-					<a class="pill" v-bind:href="'../run/run' + selected_run.id + '.trigger_event.json'"
-						target="blank">Trigger Event</a>
-					<a class="pill" v-bind:href="'../run/run' + selected_run.id + '.output_log.txt'"
-						target="blank">Logs</a>
-					<a class="pill" v-bind:href="'../run/run' + selected_run.id + '.output_data.json'"
-						target="blank">Data</a>
-					[[if is_admin:]]
-					<a class="pill" v-on:click="rerun(run)">Re-run</a>
-					<a class="pill" v-bind:href="'[[=URL('update_run')]]/' + selected_run.id">Update run</a>
-					[[pass]]
-				</div>
-				<div style="padding:10px 20px">
-					<div style="width:100%; display: flex; align-items: flex-start; gap: 10px">
-						<div style="width:30%; flex-grow: 1">
-							<h4>History</h4>
-							<ul>
-								<li>{{fmtd(selected_run.queued_timestamp)}}: queued</li>
-								<li v-if="selected_run.scheduled_timestamp">
-									{{fmtd(selected_run.scheduled_timestamp)}}: scheduled start time</li>
-								<li v-if="selected_run.status=='skipped' || selected_run.status=='jammed'">
-									{{fmtd(selected_run.start_timestamp)}}: skipped</li>
-								<li v-else-if="selected_run.start_timestamp">{{fmtd(selected_run.start_timestamp)}}:
-									start time
-								</li>
-								<li v-if="selected_run.stop_timestamp">{{fmtd(selected_run.stop_timestamp)}}:
-									{{selected_run.status}}</li>
-							</ul>
-						</div>
-						<div style="width:30%; flex-grow: 1">
-							<h4>Ancestor Runs</h4>
-							<a v-for="r in ancestor_runs" v-bind:href="window.location.pathname+'#'+r.id">#{{r.id}} {{r.name}}</a>
-						</div>
-						<div style="width:30%; flex-grow: 1">
-							<h4>Descendent Runs</h4>
-							<a v-for="r in descendant_runs" v-bind:href="window.location.pathname+'#'+r.id">#{{r.id}} {{r.name}}</a>
-						</div>
-					</div>
-				</div>
-				<div style="padding:10px 20px">
-					<h4>Output Log</h4>
-					<pre>{{selected_run.output_log}}</pre>
-				</div>
-			</div>
-		</div>
-	</div>
 </div>
+[[end]]
+
+<section class="dashboard-toolbar">
+	<span class="title">Runs</span>
+	[[if is_admin:]]
+	<a role="button" class="primary" href="[[=URL('create_run')]]">New run</a>
+	<button type="button" class="secondary outline" v-on:click="reload_config()">Reload config</button>
+	[[pass]]
+	<button type="button" class="secondary outline" v-on:click="refresh_page()">Refresh</button>
+</section>
+
+<section class="dashboard">
+	<aside class="run-list">
+		<div class="search-box">
+			<form v-on:submit.prevent="search">
+				<input v-model="words" type="search" placeholder="Search by name, tag, status, id…">
+			</form>
+		</div>
+		<div class="scroller">
+			<table>
+				<tbody>
+					<tr v-for="run in runs"
+					    v-on:click="select(run)"
+					    v-bind:class="{'run-selected': run === selected_run}">
+						<td class="swatch" v-bind:class="'status-' + run.status"></td>
+						<td>
+							<div>
+								<span class="run-id">#{{ run.id }}</span>
+								<span class="run-name">{{ run.name }}</span>
+							</div>
+							<div class="run-meta">
+								<span class="pill">{{ fmtd(run.queued_timestamp) }}</span>
+								<span v-if="run.scheduled_timestamp && !run.start_timestamp"
+								      class="pill">→ {{ fmtt(run.scheduled_timestamp) }}</span>
+								<span v-if="run.start_timestamp"
+								      class="pill">▶ {{ fmtt(run.start_timestamp) }}</span>
+								<span v-if="run.stop_timestamp"
+								      class="pill">■ {{ fmtt(run.stop_timestamp) }}</span>
+							</div>
+							<div class="run-tags" v-if="run.tags && run.tags.length">
+								<span class="pill tag-pill" v-for="t in run.tags" v-bind:key="t">{{ t }}</span>
+							</div>
+						</td>
+					</tr>
+					<tr v-if="have_more" class="more-row">
+						<td colspan="2">
+							<button type="button" class="secondary outline" v-on:click="search_more">
+								Load more
+							</button>
+						</td>
+					</tr>
+					<tr v-if="!loading && runs.length === 0">
+						<td colspan="2" style="text-align:center;color:var(--pico-muted-color);padding:1rem">
+							No runs match.
+						</td>
+					</tr>
+				</tbody>
+			</table>
+		</div>
+	</aside>
+
+	<article class="run-detail" v-if="selected_run">
+		<div class="status-bar" v-bind:class="'status-' + selected_run.status">
+			{{ selected_run.status }}
+		</div>
+		<div class="header">
+			<span class="run-id">#{{ selected_run.id }}</span>
+			<span class="run-name">{{ selected_run.name }}</span>
+			<span v-if="selected_run.tags && selected_run.tags.length"
+			      class="detail-tags">
+				<span class="pill tag-pill" v-for="t in selected_run.tags" v-bind:key="t">{{ t }}</span>
+			</span>
+		</div>
+		<p class="description" v-if="selected_run.description">
+			{{ selected_run.description }}
+		</p>
+		<div class="actions">
+			<button type="button" class="secondary outline" v-on:click="viewTriggerEvent(selected_run)">Trigger event</button>
+			<button type="button" class="secondary outline" v-on:click="viewLogs(selected_run)">Logs</button>
+			<button type="button" class="secondary outline" v-on:click="viewData(selected_run)">Data</button>
+			[[if is_admin:]]
+			<button type="button" class="secondary outline" v-on:click="rerun(selected_run)">Re-run</button>
+			<button type="button" class="secondary outline" v-on:click="editRun(selected_run)">Edit</button>
+			[[pass]]
+		</div>
+
+		<div class="columns">
+			<section>
+				<h4>History</h4>
+				<ul>
+					<li>{{ fmtd(selected_run.queued_timestamp) }} — queued</li>
+					<li v-if="selected_run.scheduled_timestamp">
+						{{ fmtd(selected_run.scheduled_timestamp) }} — scheduled
+					</li>
+					<li v-if="selected_run.status === 'skipped' || selected_run.status === 'jammed'">
+						{{ fmtd(selected_run.start_timestamp) }} — {{ selected_run.status }}
+					</li>
+					<li v-else-if="selected_run.start_timestamp">
+						{{ fmtd(selected_run.start_timestamp) }} — started
+					</li>
+					<li v-if="selected_run.stop_timestamp">
+						{{ fmtd(selected_run.stop_timestamp) }} — {{ selected_run.status }}
+					</li>
+				</ul>
+			</section>
+			<section class="related">
+				<h4>Ancestors</h4>
+				<a v-for="r in ancestor_runs" v-bind:key="r.id" v-bind:href="hashFor(r.id)">
+					#{{ r.id }} {{ r.name }}
+				</a>
+				<small v-if="!ancestor_runs.length" style="color:var(--pico-muted-color)">—</small>
+			</section>
+			<section class="related">
+				<h4>Descendants</h4>
+				<a v-for="r in descendant_runs" v-bind:key="r.id" v-bind:href="hashFor(r.id)">
+					#{{ r.id }} {{ r.name }}
+				</a>
+				<small v-if="!descendant_runs.length" style="color:var(--pico-muted-color)">—</small>
+			</section>
+		</div>
+
+		<div class="log">
+			<h4>Output log</h4>
+			<iframe v-if="isHtmlOutput(selected_run.output_log)"
+			        class="log-frame"
+			        v-bind:srcdoc="selected_run.output_log"
+			        sandbox="allow-popups allow-popups-to-escape-sandbox"
+			        title="Output log"></iframe>
+			<pre v-else-if="selected_run.output_log"
+			     v-html="linkifyLog(selected_run.output_log)"></pre>
+			<pre v-else>(no output)</pre>
+		</div>
+	</article>
+
+	<div class="empty-state" v-else>
+		Select a run on the left to see its details.
+	</div>
+</section>
+
+<dialog v-bind:open="modal.open" v-on:click="onDialogBackdropClick($event)">
+	<article v-bind:class="{'modal-tall': modal.type === 'iframe' || modal.type === 'html'}">
+		<header>
+			<button aria-label="Close" rel="prev" type="button" v-on:click="closeModal()"></button>
+			<h3>{{ modal.title }}</h3>
+		</header>
+		<div class="modal-body">
+			<iframe v-if="modal.type === 'iframe'"
+			        v-bind:src="modal.url"
+			        v-on:load="onEditFrameLoad"
+			        title="Edit run"></iframe>
+			<iframe v-else-if="modal.type === 'html'"
+			        v-bind:srcdoc="modal.content"
+			        sandbox="allow-popups allow-popups-to-escape-sandbox"
+			        title="Output log"></iframe>
+			<pre v-else-if="modal.type === 'text'" v-html="linkifyLog(modal.content)"></pre>
+			<pre v-else-if="modal.type === 'json'">{{ modal.content }}</pre>
+			<div v-else-if="modal.type === 'markdown'" class="markdown-body" v-html="modal.content"></div>
+			<p v-else-if="modal.type === 'confirm'">{{ modal.content }}</p>
+		</div>
+		<footer v-if="modal.type === 'confirm'">
+			<button type="button" class="secondary outline" v-on:click="closeModal()">Cancel</button>
+			<button type="button" class="primary" v-on:click="modal.confirm && modal.confirm()">
+				{{ modal.confirmLabel || 'Confirm' }}
+			</button>
+		</footer>
+	</article>
+</dialog>
 
 [[block page_scripts]]
 <script src="[[=URL('static/js/axios.min.js')]]"></script>
 <script src="[[=URL('static/js/vue.min.js')]]"></script>
+<script src="[[=URL('static/js/marked.min.js')]]"></script>
+<script>
+// URLs passed in from py4web so JS never hardcodes routes.
+window.PY4CI_URLS = {
+	runs: "[[=URL('api/runs')]]",
+	run_template: "[[=URL('run/run')]]" + "{id}." + "{kind}",
+	rerun_template: "[[=URL('api/rerun')]]" + "/{id}",
+	update_template: "[[=URL('update_run')]]" + "/{id}",
+	config_reload: "[[=URL('api/config/reload')]]",
+	readme: "[[=URL('readme')]]",
+};
+</script>
 <script src="[[=URL('static/js/main.js')]]"></script>
 [[end]]

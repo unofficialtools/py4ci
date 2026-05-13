@@ -1,168 +1,588 @@
-.pill {
-    padding: 2px 5px;
-    border-radius: 5px;
-    background: #dddddd;
-    color: black;
+/* ============================================================
+   py4ci — visual tweaks layered on top of Pico CSS.
+   Pico provides the typography, forms and layout primitives;
+   this file is just the bits Pico can't infer (status colors,
+   the dashboard grid, the loading indicator).
+   ============================================================ */
+
+:root {
+  --py4ci-radius: 6px;
+  --py4ci-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 
-.status-queued {
-    background: #89CFF0;
-    color: black
+/* --- top bar ----------------------------------------------- */
+.app-header {
+  border-bottom: 1px solid var(--pico-muted-border-color);
+  padding-block: 0.4rem;
+  position: sticky;
+  top: 0;
+  background: var(--pico-background-color);
+  z-index: 10;
+}
+.app-header nav { margin: 0; }
+.app-header .brand {
+  text-decoration: none;
+  color: var(--pico-color);
+  letter-spacing: 0.04em;
+}
+.app-header .user-chip {
+  font-size: 0.9rem;
+  color: var(--pico-muted-color);
+}
+.app-header .admin-badge {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  background: var(--pico-primary-background);
+  color: var(--pico-primary-inverse);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
-.status-skipped {
-    background: #aaaaaa;
-    color: black;
+.app-main {
+  padding-block: 1rem;
+}
+.app-footer {
+  border-top: 1px solid var(--pico-muted-border-color);
+  padding-block: 0.5rem;
+  text-align: center;
+  color: var(--pico-muted-color);
 }
 
-.status-starting {
-    background: #0096FF;
-    color: black;
+/* --- dashboard layout -------------------------------------- */
+.dashboard-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: flex-end;
+  margin-bottom: 1rem;
+}
+.dashboard-toolbar > .title {
+  margin-right: auto;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+.dashboard-toolbar button,
+.dashboard-toolbar [role="button"] {
+  margin: 0;
+  padding: 0.45rem 1rem;
+  font-size: 0.9rem;
+  line-height: 1.25;
+  min-height: 2.4rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.status-started {
-    background: #0047AB;
-    color: white;
+.dashboard {
+  display: grid;
+  grid-template-columns: minmax(390px, 480px) 1fr;
+  gap: 1rem;
+  align-items: start;
+}
+@media (max-width: 800px) {
+  .dashboard { grid-template-columns: 1fr; }
 }
 
-.status-timeout {
-    background: #964B00;
-    color: black;
+/* --- run list ---------------------------------------------- */
+.run-list {
+  border: 1px solid var(--pico-muted-border-color);
+  border-radius: var(--py4ci-radius);
+  overflow: hidden;
+  background: var(--pico-card-background-color);
 }
-
-.status-stopping {
-    background: #888888;
-    color: black
+.run-list .search-box {
+  padding: 0.5rem;
+  border-bottom: 1px solid var(--pico-muted-border-color);
 }
-
-.status-done {
-    background: #001f3f;
-    color: white;
+.run-list .search-box input {
+  margin: 0;
 }
-
-.status-broken {
-    background: #801040;
-    color: white;
+.run-list .scroller {
+  max-height: 78vh;
+  overflow-y: auto;
 }
-
-.status-success {
-    background: #006400;
-    color: white;
+.run-list table {
+  width: 100%;
+  margin: 0;
+  border-collapse: collapse;
 }
-
-.status-failure {
-    background: #ff0000;
-    color: white;
-}
-
-.status-stopped {
-    background: #111111;
-    color: white;
-}
-
-.status-jammed {
-    background: #FF66FF;
-    color: white;
-}
-
-.run-details {
-    font-size: 0.8em;
-}
-
-.run-selected {
-  background: yellow ! important;
-}
-
-.run-details td {
-    white-space: nowrap;
-}
-
-.runs td {
+.run-list table td {
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--pico-muted-border-color);
+  vertical-align: top;
   cursor: pointer;
 }
-
-
-.padded-title {
-    padding-left: 5px
+.run-list table tr:last-child td { border-bottom: 0; }
+/* Hover only highlights the content cell — the leftmost swatch keeps its
+   status color so you can still read the run's state at a glance. */
+.run-list table tr:hover td:not(.swatch) {
+  background: var(--pico-form-element-background-color);
+}
+.run-list .swatch {
+  width: 6px;
+  padding: 0;
+  border-bottom: 0 !important;
+}
+.run-list .run-id {
+  font-family: var(--py4ci-mono);
+  color: var(--pico-muted-color);
+  font-size: 0.85rem;
+  margin-right: 0.4rem;
+}
+.run-list .run-name {
+  font-weight: 600;
+}
+.run-list .run-meta {
+  margin-top: 0.15rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  color: var(--pico-muted-color);
+}
+.run-selected td:not(.swatch),
+.run-selected:hover td:not(.swatch) {
+  background: color-mix(in srgb, var(--pico-primary-background) 18%, transparent) !important;
+}
+.run-list .more-row td {
+  text-align: center;
+  cursor: default;
+  background: var(--pico-form-element-background-color);
+}
+.run-list .more-row td:hover { background: var(--pico-form-element-background-color); }
+.run-list .more-row button {
+  margin: 0;
+  padding: 0.3rem 0.8rem;
+  font-size: 0.8rem;
 }
 
-pre {
-    font-size: 10px;
-    line-height: 1.2em;
-    overflow-x: scroll;
+/* --- run detail -------------------------------------------- */
+.run-detail {
+  border: 1px solid var(--pico-muted-border-color);
+  border-radius: var(--py4ci-radius);
+  background: var(--pico-card-background-color);
+  overflow: hidden;
+}
+.run-detail .status-bar {
+  padding: 0.4rem 0.9rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.85rem;
+}
+.run-detail .header {
+  padding: 0.6rem 0.9rem;
+  background: var(--pico-form-element-background-color);
+  border-bottom: 1px solid var(--pico-muted-border-color);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: baseline;
+}
+.run-detail .header .run-id {
+  font-family: var(--py4ci-mono);
+  color: var(--pico-muted-color);
+}
+.run-detail .header .run-name {
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+.run-detail .description {
+  padding: 0.5rem 0.9rem;
+  color: var(--pico-muted-color);
+}
+.run-detail .actions {
+  padding: 0.5rem 0.9rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  border-top: 1px solid var(--pico-muted-border-color);
+  border-bottom: 1px solid var(--pico-muted-border-color);
+}
+/* Action buttons in the run detail header. Smaller than the toolbar so the
+   primary "New run" still reads as the top-level action. */
+.run-detail .actions [role="button"],
+.run-detail .actions button {
+  margin: 0;
+  padding: 0.25rem 0.7rem;
+  font-size: 0.78rem;
+  line-height: 1.25;
+  min-height: 0;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+}
+.run-detail .columns {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  padding: 0.8rem 0.9rem;
+}
+@media (max-width: 700px) {
+  .run-detail .columns { grid-template-columns: 1fr; }
+}
+.run-detail .columns h4 {
+  margin-top: 0;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--pico-muted-color);
+}
+.run-detail .columns ul { padding-left: 1.1rem; margin: 0; }
+.run-detail .columns ul li { margin: 0.15rem 0; }
+.run-detail .columns .related a {
+  display: block;
+  font-family: var(--py4ci-mono);
+  font-size: 0.85rem;
+}
+.run-detail .log {
+  padding: 0.5rem 0.9rem;
+  border-top: 1px solid var(--pico-muted-border-color);
+  background: var(--pico-code-background-color, #0e1116);
+}
+.run-detail .log h4 {
+  margin-top: 0;
+  color: var(--pico-muted-color);
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.run-detail pre {
+  margin: 0;
+  font-family: var(--py4ci-mono);
+  font-size: 0.78rem;
+  line-height: 1.4;
+  overflow-x: auto;
+  max-height: 60vh;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.run-detail pre a {
+  color: var(--pico-primary);
+  text-decoration: underline;
+  word-break: break-all;
+}
+.run-detail .log-frame {
+  width: 100%;
+  min-height: 50vh;
+  max-height: 70vh;
+  border: 1px solid var(--pico-muted-border-color);
+  border-radius: var(--py4ci-radius);
+  background: white;
 }
 
+.empty-state {
+  border: 1px dashed var(--pico-muted-border-color);
+  border-radius: var(--py4ci-radius);
+  padding: 2rem;
+  text-align: center;
+  color: var(--pico-muted-color);
+}
 
-/*** progress bar from http://codepen.io/holdencreative/details/pvxGxy  ***/
+/* --- modal -------------------------------------------------- */
+dialog > article {
+  max-width: 900px;
+  width: 95vw;
+  display: flex;
+  flex-direction: column;
+  max-height: 90vh;
+  padding: 0;
+}
+dialog > article > header {
+  padding: 0.75rem 1rem;
+  margin: 0;
+  border-bottom: 1px solid var(--pico-muted-border-color);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+dialog > article > header h3 {
+  margin: 0;
+  font-size: 1rem;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+dialog > article > header [rel="prev"] {
+  margin: 0;
+  flex: 0 0 auto;
+}
+dialog > article > .modal-body {
+  padding: 1rem;
+  overflow: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+dialog > article.modal-tall > .modal-body {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+dialog > article.modal-tall > .modal-body iframe {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 70vh;
+  border: 0;
+  background: white;
+  display: block;
+}
+dialog > article > .modal-body pre {
+  margin: 0;
+  font-family: var(--py4ci-mono);
+  font-size: 0.78rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 70vh;
+  overflow: auto;
+}
+dialog > article > .modal-body pre a {
+  color: var(--pico-primary);
+  text-decoration: underline;
+  word-break: break-all;
+}
+dialog > article > footer {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--pico-muted-border-color);
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+dialog > article > footer button { margin: 0; }
+
+/* Rendered README inside the help modal. */
+.markdown-body {
+  line-height: 1.55;
+  font-size: 0.95rem;
+}
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4 {
+  margin-top: 1.2rem;
+  margin-bottom: 0.5rem;
+  line-height: 1.25;
+}
+.markdown-body h1 { font-size: 1.6rem; }
+.markdown-body h2 {
+  font-size: 1.25rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid var(--pico-muted-border-color);
+}
+.markdown-body h3 { font-size: 1.05rem; }
+.markdown-body h4 { font-size: 0.95rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--pico-muted-color); }
+.markdown-body p { margin: 0.5rem 0; }
+.markdown-body ul,
+.markdown-body ol { margin: 0.5rem 0; padding-left: 1.4rem; }
+.markdown-body li { margin: 0.15rem 0; }
+.markdown-body code {
+  font-family: var(--py4ci-mono);
+  font-size: 0.82em;
+  padding: 0.05rem 0.3rem;
+  border-radius: 4px;
+  background: var(--pico-code-background-color, #f4f4f4);
+}
+.markdown-body pre {
+  background: var(--pico-code-background-color, #0e1116);
+  color: var(--pico-code-color, #e6e6e6);
+  padding: 0.6rem 0.8rem;
+  border-radius: var(--py4ci-radius);
+  overflow-x: auto;
+  font-family: var(--py4ci-mono);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+.markdown-body pre code {
+  background: transparent;
+  padding: 0;
+  font-size: inherit;
+  color: inherit;
+}
+.markdown-body blockquote {
+  margin: 0.6rem 0;
+  padding: 0.2rem 0.8rem;
+  border-left: 3px solid var(--pico-muted-border-color);
+  color: var(--pico-muted-color);
+}
+.markdown-body table {
+  width: 100%;
+  margin: 0.6rem 0;
+  border-collapse: collapse;
+}
+.markdown-body th,
+.markdown-body td {
+  padding: 0.35rem 0.55rem;
+  border-bottom: 1px solid var(--pico-muted-border-color);
+  text-align: left;
+  vertical-align: top;
+}
+.markdown-body th { font-weight: 600; background: var(--pico-form-element-background-color); }
+.markdown-body a { color: var(--pico-primary); text-decoration: underline; word-break: break-word; }
+.markdown-body hr {
+  border: 0;
+  border-top: 1px solid var(--pico-muted-border-color);
+  margin: 1rem 0;
+}
+.markdown-body img { max-width: 100%; height: auto; }
+
+/* --- pills (timestamps, actions, etc) ---------------------- */
+.pill {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  background: var(--pico-form-element-background-color);
+  border: 1px solid var(--pico-muted-border-color);
+  color: var(--pico-color);
+  font-size: 0.75rem;
+  font-family: var(--py4ci-mono);
+  text-decoration: none;
+  white-space: nowrap;
+}
+a.pill { cursor: pointer; }
+a.pill:hover { background: var(--pico-primary-background); color: var(--pico-primary-inverse); }
+
+/* Tag pills: subtle accent so they don't compete with timestamp pills. */
+.pill.tag-pill {
+  background: color-mix(in srgb, var(--pico-primary-background) 14%, transparent);
+  border-color: color-mix(in srgb, var(--pico-primary-background) 28%, transparent);
+  color: var(--pico-color);
+  font-family: inherit;
+}
+.run-list .run-tags {
+  margin-top: 0.2rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem;
+}
+.run-detail .detail-tags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-left: auto;
+}
+
+/* --- status badges ----------------------------------------- */
+.status {
+  display: inline-block;
+  padding: 0.1rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: white;
+}
+.status-queued    { background: #4a90e2; }
+.status-skipped   { background: #8a8a8a; }
+.status-starting  { background: #2a7de1; }
+.status-started   { background: #0047ab; }
+.status-timeout   { background: #b06b1a; }
+.status-stopping  { background: #6c6c6c; }
+.status-done      { background: #1a3a5e; }
+.status-broken    { background: #a02050; }
+.status-success   { background: #1f7a3a; }
+.status-failure   { background: #c0392b; }
+.status-stopped   { background: #111111; }
+.status-jammed    { background: #b042b0; }
+
+.swatch.status-queued   { background: #4a90e2; }
+.swatch.status-skipped  { background: #8a8a8a; }
+.swatch.status-starting { background: #2a7de1; }
+.swatch.status-started  { background: #0047ab; }
+.swatch.status-timeout  { background: #b06b1a; }
+.swatch.status-stopping { background: #6c6c6c; }
+.swatch.status-done     { background: #1a3a5e; }
+.swatch.status-broken   { background: #a02050; }
+.swatch.status-success  { background: #1f7a3a; }
+.swatch.status-failure  { background: #c0392b; }
+.swatch.status-stopped  { background: #111111; }
+.swatch.status-jammed   { background: #b042b0; }
+
+/* --- form-style container (used by create_run / update_run / auth) --- */
+.card {
+  max-width: 720px;
+  margin: 1rem auto;
+  padding: 1.25rem 1.5rem;
+  border: 1px solid var(--pico-muted-border-color);
+  border-radius: var(--py4ci-radius);
+  background: var(--pico-card-background-color);
+}
+.card h2 {
+  margin-top: 0;
+  font-size: 1.25rem;
+}
+.card.wide {
+  max-width: 1080px;
+}
+
+/* Pico doesn't space adjacent buttons/button-links; on the auth pages
+   [Sign In][Lost Password] etc. would render flush against each other.
+   Add a small left gap whenever two inline button-like elements sit side
+   by side. We deliberately omit `input[type=submit] + …` — Pico forces
+   the submit to width:100%, so the next button starts a new visual row
+   and should stay aligned with the form's left edge. */
+button + button,
+button + [role="button"],
+[role="button"] + button,
+[role="button"] + [role="button"] {
+  margin-left: 0.5rem;
+}
+
+/* Give every button-like element a matching bottom gap so that if a row
+   wraps onto two lines the buttons don't end up touching vertically. */
+button,
+input[type="submit"],
+input[type="button"],
+[role="button"] {
+  margin-bottom: 0.5rem;
+}
+
+/* --- users table ------------------------------------------- */
+.users-table {
+  max-width: 960px;
+  margin: 1rem auto;
+}
+.users-table table { width: 100%; }
+.users-table th { text-align: left; }
+.users-table td.email a { word-break: break-all; }
+
+/* --- loading bar (kept from prior custom.css) -------------- */
 .progress {
-    position:relative;
-    height:8px;
-    display:block;
-    background-color:#acece6;
-    background-clip:padding-box;
-    overflow:hidden;
-  }
-  .progress .determinate {
-    position:absolute;
-    background-color:inherit;
-    top:0;
-    bottom:0;
-    background-color:#26a69a;
-    transition:width .3s linear;
-  }
-  .progress .indeterminate {
-    background-color:#26a69a;
-  }
-  .progress .indeterminate:before {
-    content:'';
-    position:absolute;
-    background-color:inherit;
-    top:0;
-    left:0;
-    bottom:0;
-    will-change:left, right;
-    animation:indeterminate 2.1s cubic-bezier(0.65, 0.815, 0.735, 0.395) infinite;
-  }
-  .progress .indeterminate:after {
-    content:'';
-    position:absolute;
-    background-color:inherit;
-    top:0;
-    left:0;
-    bottom:0;
-    will-change:left, right;
-    animation:indeterminate-short 2.1s cubic-bezier(0.165, 0.84, 0.44, 1) infinite;
-    animation-delay:1.15s;
-  }
-  @-webkit-keyframes indeterminate {
-    0% {left:-35%; right:100%}
-    60% {left:100%; right:-90%}
-    100% {left:100%; right:-90%}
-  }
-  @-moz-keyframes indeterminate {
-    0% {left:-35%; right:100%}
-    60% {left:100%; right:-90%}
-    100% {left:100%; right:-90%}
-  }
-  @keyframes indeterminate {
-    0% {left:-35%; right:100%}
-    60% {left:100%; right:-90%}
-    100% {left:100%; right:-90%}
-  }
-  @-webkit-keyframes indeterminate-short {
-    0% {left:-200%; right:100%}
-    60% {left:107%; right:-8%}
-    100% {left:107%; right:-8%}
-  }
-  @-moz-keyframes indeterminate-short {
-    0% {left:-200%; right:100%}
-    60% {left:107%; right:-8%}
-    100% {left:107%; right:-8%}
-  }
-  @keyframes indeterminate-short {
-    0% {left:-200%; right:100%}
-    60% {left:107%; right:-8%}
-    100% {left:107%; right:-8%}
-  }
-  
-  #graph { transform:scale(0.8); }
+  position: relative;
+  height: 4px;
+  display: block;
+  background-color: var(--pico-form-element-background-color);
+  overflow: hidden;
+  border-radius: 999px;
+  margin-bottom: 0.75rem;
+}
+.progress .indeterminate {
+  background-color: var(--pico-primary);
+  position: absolute;
+  top: 0; bottom: 0;
+}
+.progress .indeterminate:before {
+  content: ""; position: absolute; background-color: inherit;
+  top: 0; left: 0; bottom: 0;
+  animation: indeterminate 2.1s cubic-bezier(0.65, 0.815, 0.735, 0.395) infinite;
+}
+.progress .indeterminate:after {
+  content: ""; position: absolute; background-color: inherit;
+  top: 0; left: 0; bottom: 0;
+  animation: indeterminate-short 2.1s cubic-bezier(0.165, 0.84, 0.44, 1) infinite;
+  animation-delay: 1.15s;
+}
+@keyframes indeterminate {
+  0% { left: -35%; right: 100%; }
+  60%, 100% { left: 100%; right: -90%; }
+}
+@keyframes indeterminate-short {
+  0% { left: -200%; right: 100%; }
+  60%, 100% { left: 107%; right: -8%; }
+}

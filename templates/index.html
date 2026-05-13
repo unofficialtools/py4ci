@@ -1,5 +1,14 @@
 [[extend 'layout.html']]
 
-<center>
-  <img src="[[=URL('static/media/pass.png')]]" style="max-height:80vh"/>
-</center>
+<article class="card" style="text-align:center">
+  <img src="[[=URL('static/media/pass.png')]]"
+       alt="py4ci"
+       style="max-height:50vh;max-width:100%;border-radius:6px"/>
+  <h2 style="margin-top:1rem">Welcome to py4ci</h2>
+  <p style="color:var(--pico-muted-color)">
+    A lightweight continuous integration server.
+  </p>
+  <p>
+    <a role="button" class="primary" href="[[=URL('auth/login')]]">Sign in to continue</a>
+  </p>
+</article>

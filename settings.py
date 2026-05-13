@@ -130,6 +130,21 @@ SCHEDULER_MAX_CONCURRENT_RUNS = 1
 USE_CELERY = False
 CELERY_BROKER = "redis://localhost:6379/0"
 
+# py4ci loop: if True, the CI step() loop runs in a background daemon thread
+# inside the py4web process. For production prefer running it as a separate
+# process (e.g. `python -m apps.py4ci.tasks` under systemd/supervisor) and
+# leave this False.
+RUN_CI_LOOP_INPROCESS = MODE == "development"
+
+# Shared secret used to verify GitHub webhooks (X-Hub-Signature-256). When
+# empty, signature verification is disabled (only safe for local development).
+GITHUB_WEBHOOK_SECRET = os.environ.get("PY4CI_GITHUB_WEBHOOK_SECRET", "")
+
+# Override allow-list for the PY4WEB_TESTING bypass. The bypass is only honored
+# when MODE == "development" AND this secret matches PY4WEB_TESTING_SECRET in
+# the environment.
+TESTING_BYPASS_SECRET = os.environ.get("PY4WEB_TESTING_SECRET", "")
+
 # try import private settings
 try:
     from .settings_private import *  # type: ignore[reportMissingImports]

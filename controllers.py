@@ -18,17 +18,32 @@ from .common import (
     cache,
     db,
     flash,
+    groups,
     logger,
     session,
     unauthenticated,
 )
 
+ADMIN_TAG = "admin"
+
 now = datetime.datetime.utcnow
 
-ci = CI(db, app_base_url=settings.APP_BASE_URL)
+ci = CI(
+    db,
+    app_base_url=settings.APP_BASE_URL,
+    github_webhook_secret=settings.GITHUB_WEBHOOK_SECRET,
+)
 ci.expose_api()
 
-is_testing = os.environ.get("PY4WEB_TESTING") == "true"
+# Bypass auth for tests only when (a) we are running in development mode AND
+# (b) the caller passes the matching shared secret. This makes it much harder
+# to accidentally ship a wide-open binary to production.
+_testing_secret = settings.TESTING_BYPASS_SECRET
+is_testing = (
+    settings.MODE == "development"
+    and bool(_testing_secret)
+    and os.environ.get("PY4WEB_TESTING") == _testing_secret
+)
 requires_login = auth if is_testing else auth.user
 
 
@@ -49,15 +64,27 @@ def main():
 
 
 def is_admin():
-    """is this an administrator"""
+    """is this an administrator
+
+    The canonical source of truth is the `admin` user tag (via pydal Tags),
+    matching the pattern endorsed in CLAUDE.md. Emails listed in the
+    administrators section of the YAML config are auto-tagged on first match
+    so existing configs keep working.
+    """
     if is_testing:
         return True
-    if auth.user_id:
-        user = auth.get_user()
-        emails = ci.config.get("administrators", [])
-        for email in emails:
-            if email == user.get("username") or email == user.get("email"):
-                return True
+    if not auth.user_id:
+        return False
+    if groups is not None and ADMIN_TAG in (groups.get(auth.user_id) or []):
+        return True
+    user = auth.get_user() or {}
+    emails = ci.config.get("administrators", []) or []
+    for email in emails:
+        if email == user.get("username") or email == user.get("email"):
+            # promote them to a proper tag so subsequent checks are tag-only
+            if groups is not None:
+                groups.add(auth.user_id, ADMIN_TAG)
+            return True
     return False
 
 
@@ -142,6 +169,12 @@ def update_run(run_id):
     """Page to edit an existent run"""
     if not is_admin():
         raise HTTP(404)
+    # Hide large/system fields from the edit form. Both flags must be False
+    # for the form to skip the field entirely (writable=False alone still
+    # renders the field as readonly).
+    for hidden_field in ("output_log", "output_data", "callback_token"):
+        db.task_run[hidden_field].readable = False
+        db.task_run[hidden_field].writable = False
     form = Form(db.task_run, run_id)
     if form.accepted:
         redirect(URL("main"))
@@ -180,12 +213,26 @@ def config_get():
     return ci.config
 
 
+@action("readme")
+@action.uses(requires_login)
+def readme():
+    """Serve the bundled README.md as plain text so the dashboard can render
+    it client-side. Kept inside py4ci's auth boundary."""
+    path = os.path.join(settings.APP_FOLDER, "README.md")
+    try:
+        with open(path, "r", encoding="utf-8") as fp:
+            response.content_type = "text/markdown; charset=utf-8"
+            return fp.read()
+    except OSError:
+        raise HTTP(404)
+
+
 @action("users")
-@action.uses("users.html", auth)
+@action.uses("users.html", requires_login)
 def users():
     if not is_admin():
         raise HTTP(404)
     users = db(db.auth_user).select(
         db.auth_user.id, db.auth_user.username, db.auth_user.sso_id, db.auth_user.email
     )
-    return locals()
+    return dict(users=users)

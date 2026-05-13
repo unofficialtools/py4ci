@@ -1,23 +1,29 @@
 [[extend 'layout.html']]
 
-<div id="vue">
-  <div style="display:table;width:100%">    
-    <div style="margin:10%;">
-      <table class="users">
-	<thead>
-	  <tr>
-	    <th>Id</th><th>Username</th><th>SSO Id</th><th>Email</th>
-	  </tr>
-	</thead>
-	<tbody>
-	  [[for u in users:]]
-	  <tr>
-	    <td>[[=u.id]]</td><td>[[=u.username]]</td><td>[[=u.sso_id]]</td><td>[[if u.email:]]<a href="mailto:[[u.email]]">[[=u.email]]</a>[[pass]]</td>
-	  </tr>
-	  [[pass]]
-	</tbody>
-      </table>
-    </div>
-  </div>
-</div>  
-
+<article class="card users-table">
+  <h2>Users</h2>
+  <figure>
+    <table role="grid">
+      <thead>
+        <tr>
+          <th scope="col">ID</th>
+          <th scope="col">Username</th>
+          <th scope="col">SSO ID</th>
+          <th scope="col">Email</th>
+        </tr>
+      </thead>
+      <tbody>
+        [[for u in users:]]
+        <tr>
+          <td>[[=u.id]]</td>
+          <td>[[=u.username]]</td>
+          <td>[[=u.sso_id or '']]</td>
+          <td class="email">
+            [[if u.email:]]<a href="mailto:[[=u.email]]">[[=u.email]]</a>[[pass]]
+          </td>
+        </tr>
+        [[pass]]
+      </tbody>
+    </table>
+  </figure>
+</article>

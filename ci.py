@@ -7,18 +7,26 @@ display tags and make editable
 """
 
 import datetime
+import hashlib
+import hmac
 import json
 import math
 import os
-import socket
-import time
+import re
+import secrets
+import tomllib
 import traceback
 import uuid
 
-import yaml
+# group_id is stored as a tag too (it's a uuid4 hex). We don't want to display
+# it as a user-facing tag pill, so filter anything that looks like a uuid.
+_UUID_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+
 from fabric import Connection
-from py4web import action, request
-from pydal import DAL, Field
+from py4web import HTTP, action, request
+from pydal import Field
 from pydal.validators import IS_IN_SET, IS_JSON
 from pydal.tools.tags import Tags
 
@@ -54,9 +62,10 @@ NON_TERMINAL_STATUSES = ("queued", "done", "starting", "started", "stopping")
 TERMINAL_STATUSES = ("skipped", "stopped", "jammed", "broken", "success", "failure")
 
 CONNECT_ARGS = {
-   "allow_agent": True,
-   "look_for_keys": True,
+    "allow_agent": True,
+    "look_for_keys": True,
 }
+
 
 def delta(value):
     units = {"s": 1, "m": 60, "h": 3600, "d": 24 * 3600, "w": 7 * 24 * 3600}
@@ -80,8 +89,28 @@ class Remote:
         local_input = f"{local_tmp_dir}.task.input.json"
         with open(local_input, "w") as fp:
             json.dump(input_data or {}, fp)
-        # TODO: write triggers info into remote
-        with Connection(self.host, user=self.user, connect_kwargs=CONNECT_ARGS) as connection:
+        # Build the manager script locally and ship it as a file so we don't have
+        # to worry about quoting it through `echo`. We background task.sh and
+        # capture its real PID with $! — using $$ would record the manager's
+        # PID instead, which kill may not propagate to the child.
+        local_manager_sh = f"{local_tmp_dir}.task.manager.sh"
+        manager_lines = [
+            "#!/bin/sh",
+            "set -u",
+            "./task.sh > task.log 2>&1 &",
+            "task_pid=$!",
+            "echo \"$task_pid\" > task.pid",
+            "wait \"$task_pid\"",
+            "rc=$?",
+            "if [ \"$rc\" -eq 0 ]; then echo 'success' > task.status; else echo 'failure' > task.status; fi",
+        ]
+        if self.callback:
+            manager_lines.append(f"curl -X POST --retry 5 {self.callback} || true")
+        with open(local_manager_sh, "w") as fp:
+            fp.write("\n".join(manager_lines) + "\n")
+        with Connection(
+            self.host, user=self.user, connect_kwargs=CONNECT_ARGS
+        ) as connection:
             # try kill the task if still running (should never happen)
             connection.run(
                 f"[[ -f {self.folder}/task.pid ]] && kill -9 `cat {self.folder}/task.pid` || true",
@@ -90,44 +119,43 @@ class Remote:
             # make the folder
             connection.run(f"mkdir -p {self.folder}", hide=True)
             # delete everything in it in case it existed
-            connection.run(f"rm -rf {self.folder}/* | true", hide=True)
+            connection.run(f"rm -rf {self.folder}/* || true", hide=True)
             # copy the script that needs to run
             connection.put(local_task_sh, f"{self.folder}/task.sh")
             # copy the input data
             connection.put(local_input, f"{self.folder}/task.input.json")
+            # copy the manager script
+            connection.put(local_manager_sh, f"{self.folder}/task.manager.sh")
             for payload in payloads or []:
                 payload_dir = os.path.dirname(payload.remote_name)
                 connection.run(f"mkdir -p {self.folder}/{payload_dir}", hide=True)
                 connection.put(
                     payload.local_name, f"{self.folder}/{payload.remote_name}"
                 )
-            # create a manager script and run it with dtach do does die on disconnect
+            # run the manager script with dtach so it survives disconnect
             with connection.cd(self.folder):
-                connection.run("chmod +x task.sh", hide=True)
-                steps = [
-                    "((echo $$ > task.pid) || true)",
-                    "((exec ./task.sh > task.log) && (echo 'success' > task.status) || (echo 'failure' > task.status))",
-                ]
-                if self.callback:
-                    steps.append(f"(curl -X POST --retry 5 {self.callback})")
-                script = "; ".join(steps)
-                connection.run(f"echo '{script}' > task.manager.sh", hide=True)
-                connection.run("chmod +x task.manager.sh", hide=True)
+                connection.run("chmod +x task.sh task.manager.sh", hide=True)
                 connection.run("dtach -n task.socket -E ./task.manager.sh", hide=True)
         os.unlink(local_task_sh)
         os.unlink(local_input)
+        os.unlink(local_manager_sh)
 
     def is_running(self):
-        with Connection(self.host, user=self.user, connect_kwargs=CONNECT_ARGS) as connection:
+        with Connection(
+            self.host, user=self.user, connect_kwargs=CONNECT_ARGS
+        ) as connection:
             res = connection.run(
-                f"ps -ef | grep `cat {self.folder}/task.pid` | grep -v 'grep' | wc -l",
+                f"pgrep -F {self.folder}/task.pid > /dev/null",
                 hide=True,
+                warn=True,
             )
-            return res.stdout.strip() == "2"
+            return res.return_code == 0
 
     def finish(self):
         files = {}
-        with Connection(self.host, user=self.user, connect_kwargs=CONNECT_ARGS) as connection:
+        with Connection(
+            self.host, user=self.user, connect_kwargs=CONNECT_ARGS
+        ) as connection:
             with connection.cd(self.folder):
                 # if we succeed in killing it, then it was still running
                 if connection.run(
@@ -161,13 +189,20 @@ class Remote:
 
 
 class CI:
-    def __init__(self, db, app_base_url="http://127.0.0.1:8000/py4ci", config_path=None):
+    def __init__(
+        self,
+        db,
+        app_base_url="http://127.0.0.1:8000/py4ci",
+        config_path=None,
+        github_webhook_secret="",
+    ):
         self.config_path = config_path or os.path.join(
             os.path.dirname(__file__), "ci_config"
         )
         """read the configuration file with description of workers and tasks"""
         self.db = db
         self.app_base_url = app_base_url
+        self.github_webhook_secret = github_webhook_secret or ""
         self.reload_config()
         self.define_tables()
 
@@ -181,22 +216,23 @@ class CI:
         }
         for root, _, filenames in os.walk(self.config_path):
             for filename in filenames:
-                if not filename.endswith(".yaml"):
+                if not filename.endswith(".toml"):
                     continue
                 path = os.path.join(root, filename)
-                with open(path) as fp:
-                    config = yaml.load(fp, Loader=yaml.Loader)
-                    if "administrators" in config:
-                        self.config["administrators"] += config["administrators"]
-                    if "workers" in config:
-                        self.config["workers"].update(config["workers"])
-                    if "tasks" in config:
-                        self.config["tasks"].update(config["tasks"])
-                    if "variables" in config:
-                        self.config["variables"].update(config["variables"])
+                # tomllib requires the file be opened in binary mode
+                with open(path, "rb") as fp:
+                    config = tomllib.load(fp)
+                if "administrators" in config:
+                    self.config["administrators"] += config["administrators"]
+                if "workers" in config:
+                    self.config["workers"].update(config["workers"])
+                if "tasks" in config:
+                    self.config["tasks"].update(config["tasks"])
+                if "variables" in config:
+                    self.config["variables"].update(config["variables"])
         for _, task in self.config["tasks"].items():
             for key, value in self.config.get("variables", {}).items():
-                task["command"] = task["command"].replace("${:%s}" % key, value)
+                task["command"] = task["command"].replace("${:%s}" % key, str(value))
 
     def define_tables(self):
         """define the required database tables"""
@@ -204,7 +240,12 @@ class CI:
         db.define_table(
             "task_run",
             Field("name", writable=False),
-            Field("status", default="queued", options=STATUSES, requires=IS_IN_SET(STATUSES)),
+            Field(
+                "status",
+                default="queued",
+                options=STATUSES,
+                requires=IS_IN_SET(STATUSES),
+            ),
             Field("description", "text", writable=True),
             Field("worker", writable=False),
             Field("priority", "integer", default=0),  # higher comes first
@@ -219,6 +260,7 @@ class CI:
             Field("output_log", "text", writable=False),
             Field("output_data", "json", writable=False),
             Field("group_id", writable=False),
+            Field("callback_token", writable=False, readable=False),
         )
         self.run_tags = Tags(db.task_run)
         db.commit()
@@ -234,7 +276,11 @@ class CI:
 
     def available_worker(self, queues=None):
         """returns list of addresses of available workers matching one of the specified queues"""
-        queues = set(queues if queues else ["default"])
+        if not queues:
+            queues = ["default"]
+        elif isinstance(queues, str):
+            queues = [queues]
+        queues = set(queues)
         busy_workers = self.busy_workers()
         workers = self.config["workers"]
         for name, worker in workers.items():
@@ -246,11 +292,13 @@ class CI:
         self,
         name,
         trigger_event=None,
-        extra_tags=[],
-        ancestors=[],
+        extra_tags=None,
+        ancestors=None,
         scheduled_timestamp=None,
     ):
         """creates a new task given it name and a trigger event"""
+        extra_tags = list(extra_tags) if extra_tags else []
+        ancestors = list(ancestors) if ancestors else []
         now_ = now()
         db = self.db
         task = self.config["tasks"].get(name)
@@ -267,11 +315,16 @@ class CI:
                 .select(orderby=~db.task_run.id, limitby=(0, 1))
                 .first()
             )
-            # if there is a previous task
-            if prev_task and prev_task.stop_timestamp and not scheduled_timestamp:
-                # and the next run is in the future
+            # if there is a previous task that actually started, debounce
+            # against its start time. If start_timestamp is None (e.g. the run
+            # never started) skip the debounce check rather than crashing.
+            if (
+                prev_task
+                and prev_task.stop_timestamp
+                and prev_task.start_timestamp
+                and not scheduled_timestamp
+            ):
                 if prev_task.start_timestamp + delta(task["debounce"]) > now_:
-                    # do not create a new run
                     return None
 
         # mark all queued task with the same name as skipped
@@ -308,7 +361,9 @@ class CI:
         task = self.config["tasks"].get(run.name)
         if not task:
             return
-        worker = self.available_worker(task.get("queues", "default"))
+        # pass queues as a list so available_worker doesn't accidentally split
+        # a bare string into a set of its characters
+        worker = self.available_worker(task.get("queues") or ["default"])
         if not worker:
             return
         self.assign_run_to_worker(run, worker)
@@ -317,18 +372,27 @@ class CI:
         """assign the run to the worker (does not check queue match)"""
         if run.status != "queued":
             return
-        run.update_record(status="starting", worker=worker_name, start_timestamp=now())                
+        # mint a one-time token the worker must present when it calls back
+        callback_token = secrets.token_urlsafe(32)
+        run.update_record(
+            status="starting",
+            worker=worker_name,
+            start_timestamp=now(),
+            callback_token=callback_token,
+        )
         self.db.commit()
         try:
             # move input tasks
             task = self.config["tasks"][run.name]
             code = f"export CI_RUN_ID={run.id}\n" + task["command"]
-            callback = f"{self.app_base_url}/api/done/{run.id}"
+            callback = f"{self.app_base_url}/api/done/{run.id}/{callback_token}"
             input_data = self._assemble_input_data(run)
             worker = self.config["workers"][worker_name]
             run.update_record(status="started", start_timestamp=now(), output_log=None)
             self.db.commit()
-            Remote(worker["host"], f"{RUNS_FOLDER}/run{run.id}", callback).start(code, input_data)
+            Remote(worker["host"], f"{RUNS_FOLDER}/run{run.id}", callback).start(
+                code, input_data
+            )
         except Exception:
             tb = traceback.format_exc()
             print(tb)
@@ -340,7 +404,9 @@ class CI:
             return
         try:
             worker = self.config["workers"][run.worker]
-            status, log, data = Remote(worker["host"], f"{RUNS_FOLDER}/run{run.id}").finish()
+            status, log, data = Remote(
+                worker["host"], f"{RUNS_FOLDER}/run{run.id}"
+            ).finish()
             if run.status == "stopping":
                 status = "stopped"
         except Exception:
@@ -351,7 +417,7 @@ class CI:
         # record the event
         run.update_record(
             status=status, stop_timestamp=now(), output_log=log, output_data=data
-        )        
+        )
 
         # if periodic, schedule next task
         task = self.config["tasks"].get(run.name)
@@ -406,7 +472,7 @@ class CI:
             # update all links
             for ancestor in ancestors:
                 arun = db.task_run(ancestor)
-                arun.update_record(descendants=(arun.descendants or []) + [drun_id])                
+                arun.update_record(descendants=(arun.descendants or []) + [drun_id])
 
     def _assemble_input_data(self, run):
         db = self.db
@@ -415,7 +481,8 @@ class CI:
         data["ancestor_runs"] = ancestor_runs = {}
         for ancestor in run.ancestors or []:
             arun = db.task_run(ancestor)
-            ancestor_runs[arun.name] = arun.as_json()
+            if arun:
+                ancestor_runs[arun.name] = arun.as_dict()
         return data
 
     def step(self):
@@ -460,17 +527,39 @@ class CI:
         # loop over selected runs and start them
         for run in runs:
             if run.name not in self.config["tasks"]:
-                run.delete_record()
+                # the task was removed from the config; preserve the audit
+                # trail by marking the run skipped rather than deleting it
+                run.update_record(status="skipped", stop_timestamp=now_)
                 continue
             print("starting", run.id, run.status)
             self.try_start_run(run)
         return next_timeout
 
-    def post_run_done(self, run_id):
-        """called by workers to report a run is completed"""
+    def post_run_done(self, run_id, token):
+        """called by workers to report a run is completed (token-authenticated)"""
         run = self.db.task_run(run_id)
-        if run:
-            run.update_record(status="done")
+        if not run:
+            return False
+        expected = run.callback_token or ""
+        if not expected or not hmac.compare_digest(str(expected), str(token or "")):
+            return False
+        # invalidate the token so the URL can't be replayed against this run
+        run.update_record(status="done", callback_token=None)
+        return True
+
+    def verify_github_signature(self, raw_body, signature_header):
+        """verify GitHub's X-Hub-Signature-256 header against the configured secret"""
+        if not self.github_webhook_secret:
+            # if no secret is configured we refuse to authenticate the request
+            return False
+        if not signature_header or not signature_header.startswith("sha256="):
+            return False
+        expected = hmac.new(
+            self.github_webhook_secret.encode("utf-8"),
+            raw_body if isinstance(raw_body, bytes) else raw_body.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        return hmac.compare_digest(expected, signature_header.split("=", 1)[1])
 
     def post_git(self, data):
         """connect to github webhook and update record when receive notification"""
@@ -488,12 +577,36 @@ class CI:
                 continue
             # check all triggers
             for trigger in task.get("triggered_by") or []:
-                # if matching submit
-                if trigger.get("ssh_url") == url and branch in trigger.get("branches"):
+                # if matching submit; tolerate a missing/None "branches" entry
+                if (
+                    trigger.get("ssh_url") == url
+                    and branch in (trigger.get("branches") or [])
+                ):
                     # create a task and pass it this data
                     if self.create_run(name, data, extra_tags=["commit:" + commit]):
                         triggered = True
         return f"No matching task for {url} {branch}" if not triggered else ""
+
+    LIST_PAGE_SIZE = 100
+
+    def _attach_tags(self, rows):
+        """Mutate each run dict in `rows` to include a `tags` list (excluding
+        the internal group_id uuid that is stored as a tag for indexing)."""
+        if not rows:
+            return
+        tag_table = self.run_tags.tag_table
+        ids = [r["id"] for r in rows]
+        tag_rows = self.db(tag_table.record_id.belongs(ids)).select(
+            tag_table.record_id, tag_table.tagpath
+        )
+        by_run = {}
+        for tr in tag_rows:
+            tag = tr.tagpath.strip("/")
+            if _UUID_RE.match(tag):
+                continue
+            by_run.setdefault(tr.record_id, []).append(tag)
+        for r in rows:
+            r["tags"] = by_run.get(r["id"], [])
 
     def get_runs(
         self,
@@ -506,6 +619,7 @@ class CI:
         ids=None,
         group_ids=None,
         latest=False,
+        limit=None,
     ):
         """allows seraching for runs"""
         db = self.db
@@ -530,10 +644,10 @@ class CI:
                 elif word.startswith("group:"):
                     group_ids.append(word[6:])
                 elif word in STATUSES:
-                    statues.append(word)
+                    statuses.append(word)
                 elif word in self.config["workers"]:
                     workers.append(word)
-                elif word == latest:
+                elif word == "latest":
                     latest = True
                 else:
                     tags.append(word)
@@ -565,127 +679,61 @@ class CI:
                 rows = new_rows if rows is None else (rows | new_rows)
             rows = rows.sort(lambda row: row.name)
         else:
-            rows = db(query).select(*fields, orderby=~db.task_run.id, limitby=(0, 100))
+            page_size = limit if limit is not None else self.LIST_PAGE_SIZE
+            rows = db(query).select(
+                *fields, orderby=~db.task_run.id, limitby=(0, page_size)
+            )
         return rows
 
     def expose_api(self, *uses):
         """this is mostly an example but can be called in controller"""
         db = self.db
 
-        @action("api/done/<run_id:int>", method="POST")
-        @action.uses(db, *uses)
-        def post_run_done(run_id):
-            self.post_run_done(run_id)
+        # Worker callback: authenticated by a per-run one-time token in the URL.
+        # No session fixture is involved — workers don't have one.
+        @action("api/done/<run_id:int>/<token>", method="POST")
+        @action.uses(db)
+        def post_run_done(run_id, token):
+            if not self.post_run_done(run_id, token):
+                raise HTTP(403)
+            return ""
 
+        # GitHub webhook: verify HMAC signature on the raw request body before
+        # parsing JSON, so a forged payload can't trigger runs.
         @action("api/gitpost", method="POST")
-        @action.uses(db, *uses)
+        @action.uses(db)
         def post_git():
-            return self.post_git(request.json)
+            raw = request.body.read()
+            signature = request.headers.get("X-Hub-Signature-256", "")
+            if not self.verify_github_signature(raw, signature):
+                raise HTTP(401)
+            try:
+                payload = json.loads(raw.decode("utf-8") if isinstance(raw, bytes) else raw)
+            except ValueError:
+                raise HTTP(400)
+            return self.post_git(payload)
 
-        @action("api/runs", method="GET")
+        @action("api/runs", method=["GET", "POST"])
         @action.uses(db, *uses)
         def get_runs():
+            # accept both query params and a JSON body (POST) so callers with
+            # long id lists don't bump against URL-length limits
             data = dict(request.query or {})
-            return {"runs": self.get_runs(**data).as_list()}
+            if request.method == "POST":
+                body = request.json or {}
+                data.update(body)
+            page_size = self.LIST_PAGE_SIZE
+            rows = self.get_runs(limit=page_size + 1, **data).as_list()
+            has_more = len(rows) > page_size
+            rows = rows[:page_size]
+            self._attach_tags(rows)
+            return {"runs": rows, "has_more": has_more}
 
         @action("api/runs/<run_id:int>")
         @action.uses(db, *uses)
         def get_run(run_id=None):
             run = self.db.task_run(run_id)
-            return run.as_json() if run else {}
+            return run.as_dict() if run else {}
 
 
-def test_remote(host="user@domain"):
-    def check(res, status, msg, data):
-        try:
-            assert res[0] == status
-            assert msg in res[1]
-            assert res[2] == data
-        except:
-            print(res, (status, msg, data))
-            raise
-
-    payloads = [
-        {
-            "local_name": os.path.join(os.path.dirname(__file__), "data/payload.zip"),
-            "remote_name": "a/b/c.zip",
-        }
-    ]
-    Remote(host).start("echo 'test1' && sleep 2 && echo 'success' > task.status")
-    assert Remote(host).is_running()
-    time.sleep(4)
-    check(
-        Remote(host).finish(),
-        "success",
-        "test1",
-        {},
-    )
-
-    Remote(host).start("echo 'test2' && sleep 10 && echo 'success' > task.status")
-    assert Remote(host).is_running()
-    time.sleep(2)
-    check(
-        Remote(host).finish(),
-        "timeout",
-        "test2",
-        None,
-    )
-
-    Remote(host).start("echo 'test3' && sleep 2 && false")
-    assert Remote(host).is_running()
-    time.sleep(4)
-    check(
-        Remote(host).finish(),
-        "broken",
-        "test3",
-        None,
-    )
-
-    Remote(host).start(
-        "echo 'test4' && sleep 2 && echo 'failure' > task.status"
-    )
-    assert Remote(host).is_running()
-    time.sleep(4)
-    check(
-        Remote(host).finish(),
-        "failure",
-        "test4",
-        {"status": "failure"},
-    )
-    print("done!")
-
-def test_ci():
-    db = DAL(
-        "sqlite://storage.sqlite",
-        folder=os.path.join(os.path.dirname(__file__), "databases"),
-    )
-    ci = CI(db=db)
-    ci.step()
-    ci.create_run("task1")
-    ci.step()
-    for run in db(db.task_run).select():
-        print(run.id, run.status)
-    print("sleeping")
-    time.sleep(10)
-    ci.step()
-    for run in db(db.task_run).select():
-        print(run.id, run.status)
-    ci.create_run("task1")
-    ci.step()
-    for run in db(db.task_run).select():
-        print(run.id, run.status)
-    print("sleeping")
-    time.sleep(1)
-    while db(db.task_run.status.belongs(NON_TERMINAL_STATUSES)).count():
-        time.sleep(1)
-        ci.step()
-    for run in db(db.task_run).select():
-        print(run.id, run.status)
-    db.commit()
-
-
-if __name__ == "__main__":
-    if True:
-        test_remote()
-    if False:
-        test_ci()
+# Manual integration tests for Remote and CI live in apps/py4ci/tests/test_ci.py.

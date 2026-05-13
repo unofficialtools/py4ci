@@ -1,258 +1,487 @@
-# py4CI
+# py4ci
 
-Py4ci is a general-purpose Continuous Integration (CI) system written in Python and built on py4web. It targets Linux systems only and is designed as a lightweight alternative to CI platforms such as Bamboo or Jenkins, particularly for small to medium deployments (approximately 1–1000 workers).
+**py4ci** is a small, self-contained Continuous Integration server written in
+Python on top of [py4web](https://py4web.com). It dispatches shell commands
+to remote Linux hosts over SSH, captures their output, and chains the results
+together into pipelines.
 
-Py4ci supports both single-node and distributed execution models and can be integrated with Docker, Podman, and Nix-based environments.
+It is designed as a lightweight alternative to systems like Jenkins or Bamboo
+for deployments in the range of one worker on the same machine up to about a
+thousand workers. It is single-binary, single-database, and easy to read end
+to end.
 
-Py4ci emphasizes:
-- Minimal operational complexity
-- Zero-configuration workers
-- Explicit, reproducible execution environments
-- Straightforward horizontal scaling
+py4ci emphasises:
 
-Py4ci is designed to require no agent installation or configuration on worker nodes.
-Workers only need to have the following required system packages installed in order to execute jobs:
-
-- ``dtach``
-- ``curl``
-
-Moreover, the server must be able to ``ssh -A {user}@{worker}`` into the workers without a password.
+- minimal operational complexity (one process, one database, one config dir);
+- zero-configuration workers (no agent — only `dtach` and `curl` on the worker);
+- explicit, reproducible execution environments (you write the shell command);
+- straightforward horizontal scaling (add a worker to a TOML file).
 
 ![Screenshot](static/media/screenshot01.png)
 
-## Run it (with uv)
+---
 
-    mkdir apps
-    pushd apps
-    git clone {py4ci}
-    popd
-    uv run --with-requirements apps/py4ci/requirements.txt py4web run apps
+## Table of contents
 
-## Nomenclature
+- [What it does](#what-it-does)
+- [Architecture](#architecture)
+- [Installation](#installation)
+- [Running the CI loop](#running-the-ci-loop)
+- [Server settings (`settings.py`)](#server-settings-settingspy)
+- [Configuration files (`ci_config/*.toml`)](#configuration-files-ci_configtoml)
+  - [How files are loaded](#how-files-are-loaded)
+  - [`administrators`](#administrators)
+  - [`variables`](#variables)
+  - [`workers`](#workers)
+  - [`tasks`](#tasks)
+  - [Triggers](#triggers)
+  - [Time-based fields](#time-based-fields)
+- [GitHub webhooks](#github-webhooks)
+- [GitHub single sign-on](#github-single-sign-on)
+- [Web UI](#web-ui)
+- [Security model](#security-model)
+- [Database](#database)
 
-### Tasks
+---
 
-A task is a static description of a unit of work. Tasks are defined by users in YAML and consist of:
+## What it does
 
-- a unique name
-- a shell script to execute
+You describe **tasks** in TOML — each task is essentially a shell script plus
+some metadata (a name, a list of queues it can run on, a timeout, optionally
+a periodic schedule, optionally a list of triggers).
 
-Tasks may also declare optional attributes, including:
+You describe **workers** in TOML — each worker is an `ssh user@host` plus a
+list of queue names it serves.
 
-- execution timeout
-- periodicity (scheduled execution)
-- dependencies on other tasks
-- external or internal triggers
-- additional execution metadata
+py4ci then runs an event loop that:
 
-Tasks are immutable definitions; they do not represent execution state.
+1. Watches for triggers (an HTTP POST to `/api/gitpost` from GitHub, the
+   successful completion of an ancestor task, or a scheduled time arriving);
+2. Creates a **run** record in its database for each triggered task;
+3. Picks an idle worker whose queue list overlaps the task's queue list;
+4. Copies a small shell script to the worker over SSH and starts it under
+   `dtach` so it survives disconnect;
+5. Waits for the worker to POST back to `/api/done/<run_id>/<token>` with
+   a per-run callback token;
+6. Pulls back the task's log and status file over SSH and stores them.
 
-### Runs
+The web UI lets you search and inspect runs, see their full log, re-run a
+failed run, and edit a run's metadata (timeout, schedule, etc.).
 
-A run is a concrete execution instance of a task. Each run is uniquely identified by a run ID (numeric).
+---
 
-A run maintains a complete execution history, including:
+## Architecture
 
-- enqueue time
-- scheduled start time
-- actual start time
-- execution host (worker)
-- completion time
+```
+   ┌────────────────────────┐         ┌───────────────────────┐
+   │   py4web (this app)    │         │    worker (Linux)     │
+   │ ─────────────────────  │  ssh    │ ───────────────────── │
+   │  controllers/ci.py     │ ──────► │ ci_runs/runN/task.sh  │
+   │  • CI loop thread      │  scp    │ ci_runs/runN/task.log │
+   │  • REST API            │ ◄──     │ ci_runs/runN/task.pid │
+   │  • Web UI              │         │ (dtach detached)      │
+   │  • SQLite db           │ ◄────── │ HTTP POST callback    │
+   │                        │   curl  │  /api/done/N/<token>  │
+   └────────────────────────┘         └───────────────────────┘
+```
 
-Each run has a status, one of:
+- The **CI loop** runs every five seconds and is responsible for transitioning
+  runs through their state machine: `queued → starting → started →
+  done/timeout/jammed → success/failure/broken`. By default the loop runs
+  inside a daemon thread of the py4web process. For production, set
+  `RUN_CI_LOOP_INPROCESS = False` in `settings.py` and run the loop as a
+  separate process under `systemd` or `supervisor`:
 
-    queued | started | running | success | failed | broken | jammed | skipped
+      python -m apps.py4ci.tasks
 
+- The **dispatch** mechanism is plain SSH. The server writes a small
+  `task.manager.sh` to the worker, then runs
+  `dtach -n task.socket -E ./task.manager.sh` so the script survives the
+  SSH session ending. The manager script backgrounds `task.sh`, records its
+  PID, waits for completion, writes `task.status` (`success` or `failure`),
+  and POSTs back to the server.
 
-A run also records:
+- The **callback** carries a one-time URL-safe token (`secrets.token_urlsafe`)
+  that the server minted when it started the run. The token is stored on the
+  run row, included in the callback URL, and invalidated as soon as the
+  callback is honored.
 
-- full log output
-- ancestor runs (triggers)
-- descendant runs (runs triggered by this run)
+- All run metadata lives in a single SQLite table (`task_run`).
 
-### Triggers and Run Chaining
+---
 
-Runs may be triggered in multiple ways:
+## Installation
 
-- by an HTTP POST request (e.g., a GitHub webhook on push)
-- by the successful completion of another run
+Worker requirements (only):
 
-This mechanism allows chaining and pipelines of tasks.
+- `dtach`
+- `curl`
+- a Linux account the server can reach with `ssh -A user@host` (no password).
 
-The run that triggers another run is called its ancestor.
-Runs triggered as a result of a run are called its descendants.
+Server requirements:
 
-### Scheduling and Concurrency
+- Python 3.11+ (uses the stdlib `tomllib`),
+- the packages in `requirements.txt` (`py4web`, `fabric`).
 
-Runs execute in parallel whenever possible, subject to the following constraints:
+The simplest way is via [uv](https://github.com/astral-sh/uv):
 
-- each worker executes at most one run at a time
-- a single physical host may execute multiple runs concurrently by registering
-multiple workers with distinct names but the same hostname or IP address
+```bash
+mkdir apps
+cd apps
+git clone <py4ci-repo-url> py4ci
+cd ..
+uv run --with-requirements apps/py4ci/requirements.txt py4web run apps
+```
 
-This model enables controlled parallelism while maintaining explicit resource limits.
+Then visit `http://127.0.0.1:8000/py4ci/` in a browser.
 
-## Execution Model
+---
 
-- The web server runs a background process called the scheduler.
-- When an event triggers a run, the scheduler selects an available worker and starts the run via SSH.
-- Upon completion, the worker notifies the server using an HTTP POST callback.
-- The scheduler then retrieves the run’s output and artifacts from the worker using SCP.
-- All run metadata and state transitions are stored in a single database table.
-- At this time there is no retry logic.
+## Running the CI loop
 
-### Server Configuration
+The CI loop is what actually drives runs forward. There are two ways to host
+it:
 
-In ``py4ci/settings.py`` configure:
+1. **In-process daemon thread (default in development).** With
+   `RUN_CI_LOOP_INPROCESS = True` (the default when `PY4WEB_MODE=development`),
+   the loop starts automatically inside the py4web process. This is the
+   simplest option but only safe when you run exactly one py4web worker —
+   otherwise each py4web worker would start its own loop and they'd race on
+   the same `task_run` rows.
 
-- ``APP_BASE_URL``: the url to be used by the workers to reach your app.
-- ``SMTP_SSL``, ``SMTP_SERVER``, ``SMTP_SENDER``, ``SMTP_LOGIN``, ``SMTP_TLS``: The email settings used by the authentication logic.
-- ``OAUTH2GOOGLE_*``, ``OAUTH2GITHUB_*``, etc. Optional Single Sign configuration.
+2. **Separate process (production).** Set `RUN_CI_LOOP_INPROCESS = False` and
+   run the loop yourself:
 
-### Workers Configuration
+       python -m apps.py4ci.tasks
 
-All remaining Py4ci configuration is defined in YAML files located under ``py4ci/ci_config``.
+   under `systemd`, `supervisor` or similar. Output is appended to
+   `ci.log` inside the app directory.
 
-The configuration may be split across any number of YAML files.
-File names are not significant, and configuration files may be organized into arbitrary subdirectories.
+---
 
-At startup, Py4ci recursively reads all YAML files in this directory and merges them into a single internal configuration data structure.
+## Server settings (`settings.py`)
 
-For example:
+The only py4ci-specific settings you typically touch are:
 
-    # in file py4ci/ci_config/workers.yaml
-    workers:
-      worker01:
-        host: me@127.0.0.1
-        queues:
-        - default
-      worker02:
-        host: me@192.168.1.23
-        queues:
-        - default
-        - fast
+| Setting | Meaning |
+|---|---|
+| `APP_BASE_URL` | The public URL of py4web as workers see it. Used to build the callback URL workers POST to when a run finishes. |
+| `RUN_CI_LOOP_INPROCESS` | If `True`, start the CI loop as a daemon thread in the py4web process. Default: `True` in development mode, otherwise `False`. |
+| `GITHUB_WEBHOOK_SECRET` | Shared secret used to verify `X-Hub-Signature-256` on `/api/gitpost`. Without this set, the endpoint refuses every request. |
+| `TESTING_BYPASS_SECRET` | When `MODE == "development"` AND `PY4WEB_TESTING` env var matches this value, every request is treated as an admin. Don't set this in production. |
+| `OAUTH2GITHUB_CLIENT_ID` / `OAUTH2GITHUB_CLIENT_SECRET` | Enables "sign in with GitHub" — see below. |
+| `SMTP_*` | Standard py4web auth email settings, used only if you let users register with email/password. |
 
-Or:        
+The rest of the standard py4web settings (DB, session, password complexity,
+…) apply unchanged. See `settings.py` for the full list.
 
-    # in file py4ci/ci_config/localhost_workers.yaml
-    workers:
-      worker01:
-        host: user@127.0.0.1
-        queues:
-        - default
+---
 
-    # in file py4ci/ci_config/remote_workers.yaml
-    workers:
-      worker02:
-        host: user@192.168.1.23
-        queues:
-        - default
-        - fast
+## Configuration files (`ci_config/*.toml`)
 
-- The names of the configuration files is not significant.
-- The names of the workers is not significant.
-- The names of the queues is not significant.
-- The host is specified in the form {user}@{hostname-or-IP}, where {user} must be the same user account that runs the web server and must be able to establish passwordless SSH access to the worker nodes.
+Everything else — administrators, workers, tasks, substitution variables —
+lives in TOML files under `apps/py4ci/ci_config/`. py4ci does not have an
+admin UI for editing this configuration; edit the files on disk and use
+**Reload config** in the web UI to pick up changes without restarting.
 
-You should also specify "administrators":
+### How files are loaded
 
-    # in file py4ci/ci_config/administrator.yaml
-    administrators:
-      - username1
-      - username2
+- At startup (and whenever you click **Reload config**), py4ci recursively
+  walks `ci_config/` and reads every file ending in `.toml`.
+- File names and directory structure are **not significant** — only the
+  top-level keys (`administrators`, `workers`, `tasks`, `variables`) matter.
+- Configuration is **merged** across files:
+  - `administrators` lists are concatenated;
+  - `workers`, `tasks` and `variables` tables are merged key-by-key (later
+    files override earlier ones for the same name).
+- After all files are loaded, py4ci performs variable substitution: for each
+  variable `key = "value"` in the `variables` table, any occurrence of
+  `${:key}` inside a task's `command` is replaced with `value`.
+- This means you can split things however you like (one file per task, one
+  file per project, one big file…) and you can keep secrets in a separate
+  file that's `.gitignore`d.
 
-or
+### `administrators`
 
-    # in file py4ci/ci_config/administrator1.yaml
-    administrators:
-      - username1
+```toml
+# in file ci_config/administrators.toml
+administrators = ["alice", "bob@example.com"]
+```
 
-    # in file py4ci/ci_config/administrator2.yaml
-    administrators:
-      - username2
+- Each entry is matched against the logged-in user's **username** or
+  **email**. The first time a logged-in user matches, they are promoted to
+  the `admin` role via the pydal `Tags` table, so subsequent checks no
+  longer need to consult this list.
+- Administrators can see and edit every run, can create new runs from the
+  web UI, and can reload the configuration.
+- Non-administrators only see runs whose task lists them in
+  `authorized_users`.
 
-The administrator username is a py4ci username. It allows the logged-in user, if an administrator, to manage tasks through the web UI (create/delete/edit and resubmit).
-An administrator can see and manage all runs.
+### `variables`
 
-### Tasks Configuration
+```toml
+[variables]
+build_image  = "alpine:3.19"
+some_secret  = "abracadabra"
+```
 
-Tasks are configured in a similar way to workers:
+- Variables are textually substituted into every task's `command` string.
+- Reference them as `${:name}` in the command. Example:
 
-For example here is the definition of a periodic heartbeat task that tells time (date):
+      command = """
+      docker run ${:build_image} sh -c "echo $SOME_SECRET=${:some_secret}"
+      """
 
-    # in file py4ci/ci_config/periodic_tasks.yaml
-    tasks:
-      my-heartbeat:
-        enabled: true
-        description: checks the date every 1h
-        queues:
-        - default
-        tags:
-        - heartbeat
-        - isperiodic
-        period: 1h
-        debounce: 1m
-        priority: 0
-        timeout: 180s
-        command: |
-          date
-        authorized_users:
-        - me
+- Substitution happens at config-load time, not per-run, so changing a
+  variable requires a config reload.
 
-- The name of the configuration file is not significant.
-- ``my-heartbeat`` is the name assigned to this task.
-- This task may only execute on the default queue, provided that at least one worker is assigned to that queue.
-- ``tags`` are arbitrary labels used exclusively for filtering and searching runs in the web UI.
-- ``authorized_users`` specifies the Py4ci usernames of users permitted to view runs for this task.
-- By default, only one run per task may execute at any given time. If a new trigger occurs   while a run is already executing, the new run is skipped.
-- The ``debounce`` parameter extends this skip window for an arbitrary duration after the most recent run has started.
-- Time-based fields (``period``, ``debounce``, ``timeout``) accept the following units: {n}s, {n}m, {n}h, {n}d, {n}w, where n is a numeric value. Note: all time values are displayed in seconds in the web UI.
+### `workers`
 
-For example, the following shows the definition of a task triggered by an HTTP POST request that fetches a repository when invoked:
+A worker is a name, a target host, and the list of queues it can serve.
 
-    # in file py4ci/ci_config/my-pipeline.yaml
-    tasks:
-      my-repo-change:
-        enabled: true
-        description: list files when repo changes
-        queues:
-        - default
-        tags:
-        - repo
-        triggered_by:
-        - ssh_url: git@github.com:web2py/py4web.git
-          branches:
-          - master
-        priority: 0
-        timeout: 180s
-        command: |
-          git clone https://github.com/web2py/py4web.git
-          pushd py4web
-          ls -l
-          popd
-          echo "DONE!"
-        authorized_users:
-        - me
+```toml
+[workers.worker01]
+host   = "ci@127.0.0.1"
+queues = ["default"]
 
-This assumes a github "on commit" webhook and will trigger when a new commit to master is pushed.
+[workers.fast01]
+host   = "ci@192.168.1.23"
+queues = ["default", "fast", "gpu"]
+```
 
-Below is a task that triggers when a run of the previous task (``my-repo-change``) completes successfully:
+- `host` must be in `user@hostname` form. The user is the account py4web
+  uses to SSH into the worker; the local server account must be able to
+  `ssh user@hostname` without entering a password (use `ssh-agent` and
+  `ssh -A`, or install your public key on the worker).
+- A single physical machine can host multiple workers — just register them
+  under different names. Each worker only runs one task at a time, so two
+  workers on the same host gives you a concurrency of 2 there.
+- `queues` is the list of queue names this worker can serve. A task can run
+  on a worker if `set(task.queues) & set(worker.queues)` is non-empty.
 
-    # in file py4ci/ci_config/my-pipeline.yaml
-    tasks:
-      ...
-      my-repo-change-followup:
-        enabled: true
-        description: just prints done!
-        queues:
-        - default
-        triggered_by:
-        - task: my-repo-change
-        priority: 0
-        timeout: 180s
-        command: |
-          echo "DONE!"
-        authorized_users:
-        - me
+### `tasks`
 
-A trigger is either an HTTP POST (gtihub webhook) or a task.
+A task is the static description of a unit of work.
+
+```toml
+[tasks.my-heartbeat]
+enabled         = true
+description     = "log the date every hour"
+queues          = ["default"]
+tags            = ["heartbeat"]
+period          = "1h"
+debounce        = "1m"
+priority        = 0
+timeout         = "180s"
+command         = """
+date
+"""
+authorized_users = ["alice"]
+```
+
+| Key | Type | Meaning |
+|---|---|---|
+| `enabled` | bool | If `false`, GitHub webhook triggers are ignored (periodic / ancestor / manual triggers still work). |
+| `description` | str | Free-text description shown in the UI. |
+| `queues` | list[str] | Queues this task can run on. Defaults to `["default"]`. |
+| `tags` | list[str] | Free-text labels. Shown as pills in the UI and searchable. |
+| `period` | duration | If set, the task is automatically re-queued every `period`. See [Time-based fields](#time-based-fields). |
+| `debounce` | duration | After a run starts, suppress new triggers for this task for `debounce`. Useful for noisy webhooks. |
+| `priority` | int | Tasks with higher priority are picked from the queue first. `100` priority is worth a 100-second head start over a `0`-priority task. |
+| `timeout` | duration | Maximum wall-clock time for the run. After this, the run is marked `timeout` and the process is killed. Default `180s`. |
+| `command` | str | The shell script to execute on the worker. Run with `sh`, with the environment variable `CI_RUN_ID` set to the run's id. Use a TOML triple-quoted string for multiple lines. `${:var}` substitution applies. |
+| `authorized_users` | list[str] | py4ci usernames/emails that may view this task's runs. Use `["*"]` to allow any logged-in user. Administrators always have access. |
+| `triggered_by` | array of tables | See [Triggers](#triggers). |
+
+The shell command receives a JSON file at `task.input.json` in its working
+directory, containing the trigger event and the recent results of any
+ancestor runs:
+
+```json
+{
+  "trigger_event": { ... GitHub payload, or {"run_completion": <id>} ... },
+  "ancestor_runs": { "task-name": { "id": 42, "status": "success", ... } }
+}
+```
+
+### Triggers
+
+A task is triggered (i.e. a new run is created and queued) in one of three
+ways:
+
+1. **Periodic.** Set `period = "<duration>"`. py4ci re-queues the task that
+   long after the previous scheduled time.
+
+2. **GitHub push.** Add a `[[tasks.<name>.triggered_by]]` block matching a
+   repository URL and one or more branches:
+
+       [tasks.deploy]
+       enabled = true
+       command = "..."
+
+       [[tasks.deploy.triggered_by]]
+       ssh_url  = "git@github.com:acme/web.git"
+       branches = ["main", "staging"]
+
+   When py4ci receives a verified webhook with a matching `ssh_url` and a
+   ref ending in one of the listed branches, it creates a run and tags it
+   `commit:<sha>`. `enabled = true` is required for webhook triggers.
+
+3. **Successful ancestor run.** Reference another task by name:
+
+       [tasks.smoke-tests]
+       command = "..."
+
+       [[tasks.smoke-tests.triggered_by]]
+       task = "deploy"
+
+   When `deploy` completes with status `success`, py4ci creates a
+   `smoke-tests` run, links the ancestor's id into `ancestors`, links the
+   descendant's id back into the ancestor's `descendants`, and assigns the
+   same `group_id` so the whole pipeline is searchable by one tag.
+
+A single task can have multiple `[[tasks.x.triggered_by]]` entries combining
+any of the above.
+
+### Time-based fields
+
+`period`, `debounce` and `timeout` accept either a plain integer (seconds)
+or a string with a unit suffix:
+
+| Suffix | Unit |
+|---|---|
+| `s` | seconds |
+| `m` | minutes |
+| `h` | hours |
+| `d` | days |
+| `w` | weeks |
+
+Examples: `"30s"`, `"5m"`, `"2h"`, `"7d"`, `"1w"`.
+
+---
+
+## GitHub webhooks
+
+py4ci exposes `POST /<app>/api/gitpost` for GitHub webhook delivery.
+
+1. In your repository on GitHub, **Settings → Webhooks → Add webhook**.
+2. **Payload URL**: `https://<your-app-base-url>/py4ci/api/gitpost`.
+3. **Content type**: `application/json`.
+4. **Secret**: choose a strong random string. **Set the same value as
+   `GITHUB_WEBHOOK_SECRET` in `settings.py`** (or in the environment as
+   `PY4CI_GITHUB_WEBHOOK_SECRET`).
+5. **Which events?** "Just the push event" is enough.
+
+py4ci verifies the `X-Hub-Signature-256` header on every webhook delivery
+using HMAC-SHA256 with the configured secret. **If `GITHUB_WEBHOOK_SECRET`
+is empty, the endpoint refuses every request with 401** — this is on
+purpose, so you don't accidentally accept anonymous triggers.
+
+On every verified push, py4ci compares the repository's `ssh_url` and the
+pushed ref's branch against every task's `triggered_by` entries. Each
+matching task gets a new run, tagged `commit:<sha>`.
+
+---
+
+## GitHub single sign-on
+
+py4ci uses py4web's built-in OAuth2 plugin for GitHub. To enable it:
+
+1. **Register an OAuth App on GitHub.**
+   - Visit
+     [github.com/settings/developers → OAuth Apps → New OAuth App](https://github.com/settings/developers).
+   - **Application name**: anything (e.g. `py4ci`).
+   - **Homepage URL**: `https://<your-app-base-url>/py4ci/`.
+   - **Authorization callback URL**: must exactly match
+     `https://<your-app-base-url>/py4ci/auth/plugin/oauth2github/callback`
+   - GitHub will issue a **Client ID** and **Client Secret**.
+
+2. **Configure py4ci.** In `settings.py` (or, better, in a
+   `settings_private.py` you don't check in):
+
+       OAUTH2GITHUB_CLIENT_ID     = "Iv1.xxxxxxxxxxxxxxxx"
+       OAUTH2GITHUB_CLIENT_SECRET = "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+   You may also want to disable the default email/password flow if GitHub is
+   your only sign-in:
+
+       DEFAULT_LOGIN_ENABLED = False
+
+3. **Restart py4web.** A **Sign in with GitHub** button will appear on the
+   `/py4ci/auth/login` page. The first time a user signs in, py4ci creates
+   a local `auth_user` row populated from their GitHub profile (username,
+   email, etc.).
+
+4. **Promote them to admin.** Add their GitHub username or email to
+   `administrators.toml`:
+
+       administrators = ["alice", "alice@example.com"]
+
+   The next time they sign in, py4ci sees the match, attaches the `admin`
+   tag to their user row, and from then on the check is tag-based (so
+   removing them from the TOML file does **not** demote them automatically
+   — remove the `admin` tag from `auth_user_tag_groups` if you need to).
+
+5. **(Optional) Promote others without TOML edits.** Once at least one
+   admin exists, that admin can manage other users' admin tag directly via
+   the database. A future version of the UI will expose this; today it's a
+   one-liner against `auth_user_tag_groups`.
+
+---
+
+## Web UI
+
+- `/py4ci/main` — main dashboard. Left sidebar lists runs (most recent first),
+  with status swatch, name, queued/start/stop times and tag pills. The search
+  box accepts plain words (matched as tags), a task name, a status name
+  (e.g. `failure`), a worker name, a run id, `latest`, or `group:<id>`.
+- Selecting a run shows its details on the right: status, history, ancestors,
+  descendants, output log (auto-detects HTML output and renders it in a
+  sandboxed iframe, otherwise linkifies URLs in plain text).
+- The action buttons in the detail header — Trigger event, Logs, Data,
+  Re-run, Edit — all open in a modal so the dashboard stays in context.
+- The toolbar buttons **New run** / **Reload config** / **Refresh** are
+  admin-only.
+
+---
+
+## Security model
+
+- **Web UI access** is gated by py4web auth. Per-task access is further
+  restricted by the task's `authorized_users` list (with `["*"]` meaning
+  any logged-in user; admins always have access).
+- **Worker callbacks** (`POST /api/done/<run_id>/<token>`) authenticate via
+  a 256-bit URL-safe token minted per run by the server and invalidated as
+  soon as the callback succeeds. There is no shared secret to leak; if a
+  worker is compromised, only the token for its current run is exposed.
+- **GitHub webhooks** (`POST /api/gitpost`) authenticate via
+  `X-Hub-Signature-256` HMAC. Empty `GITHUB_WEBHOOK_SECRET` means **no
+  webhook traffic is accepted**.
+- **SSH** is the trust boundary between the server and workers; py4ci
+  assumes the server account has passwordless SSH access to each worker and
+  that the worker's filesystem under `ci_runs/` is private to that user.
+
+---
+
+## Database
+
+All run state lives in one SQLite table, `task_run`. Notable columns:
+
+| Column | Purpose |
+|---|---|
+| `name` | task name (foreign-keyless reference to `ci_config/tasks.toml`) |
+| `status` | one of `queued`, `skipped`, `starting`, `started`, `jammed`, `timeout`, `stopping`, `stopped`, `done`, `broken`, `success`, `failure` |
+| `worker` | the worker name that ran (or is running) this run |
+| `priority`, `timeout` | copied from the task definition at create time |
+| `trigger_event` | JSON of the event that created the run |
+| `ancestors`, `descendants` | run-id lists |
+| `queued_timestamp`, `scheduled_timestamp`, `start_timestamp`, `stop_timestamp` | the run's timeline |
+| `output_log`, `output_data` | what the worker produced |
+| `group_id` | pipeline grouping (a UUID shared across triggered runs) |
+| `callback_token` | short-lived secret for the worker's done callback |
+
+Tags (run tags and admin tags) live in companion tables managed by pydal's
+`Tags` tool.
+
+SQLite is fine for "small to medium" deployments; for higher throughput
+swap the `DB_URI` in `settings.py` for Postgres and bump `DB_POOL_SIZE`.
