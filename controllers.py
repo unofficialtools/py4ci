@@ -137,9 +137,14 @@ def index():
 
 
 @action("main")
-@action.uses("main.html", requires_login)
+@action.uses("main.html", requires_login, admin_url_signer)
 def main():
-    """To search and view runs"""
+    """To search and view runs.
+
+    The signer is listed in @action.uses so its on_request() runs and the
+    signing key is materialized in the session before the template tries
+    to call URL(..., signer=admin_url_signer).
+    """
     return dict(
         is_admin=is_admin(),
         admin_url_signer=admin_url_signer,
